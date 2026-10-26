@@ -131,6 +131,24 @@ liars train --config configs/nli_zeroshot.yaml --set nli.model_id=MoritzLaurer/D
 
 ## Phase 4 — Kaggle packaging + first GPU run
 
+What it does: run any `liars` command on a Kaggle T4 from the terminal and merge the
+outputs back into `data/`. Full guide: [docs/KAGGLE.md](docs/KAGGLE.md).
+- `scripts/kaggle_run.py` — `data` (private data dataset + manifest), `code` (private
+  code snapshot), `push` (builds a thin notebook + kernel-metadata.json, `kaggle kernels
+  push --accelerator NvidiaTeslaT4`), `status`, `wait`, `fetch` (download + merge),
+  `merge` (manual zip), `template`.
+- `notebooks/kaggle/run_cli.ipynb` — the generic notebook for the manual flow (generated
+  by `kaggle_run.py template`).
+- `scripts/gpu_info.py` — GPU, memory, versions, 4-bit load check (first cell of every run).
+- `scripts/build_wheel.sh` — wheel + source tarball for the code dataset.
+
+How to run:
+```bash
+python scripts/kaggle_run.py push --name nli-bench --code dataset \
+  --cmd "liars train --config configs/nli_zeroshot.yaml --test data/bench/test.jsonl --set nli.progress=false" --wait
+python scripts/kaggle_run.py fetch --name nli-bench
+```
+
 ## Phase 5 — Open-LLM zero-shot scoring + model benchmark
 
 ## Phase 6 — QLoRA open-LLM classifier

@@ -169,10 +169,13 @@ def build_notebook(commands: list[str], ref: str = "main", repo: str = REPO,
     md = ("# liars: run CLI commands on a Kaggle GPU\n"
           "Thin notebook: install the repo, copy data, GPU info, run `liars` commands, zip outputs.\n"
           "Settings: GPU T4 x2, Internet on. Run with Save Version -> Save & Run All.\n")
+    cells = [{"cell_type": "markdown", "metadata": {}, "source": md.splitlines(keepends=True)},
+             _code_cell(cfg), _code_cell(INSTALL_CELL), _code_cell(PATHS_CELL),
+             _code_cell(GPU_CELL), _code_cell(RUN_CELL), _code_cell(ZIP_CELL)]
+    for i, c in enumerate(cells):
+        c["id"] = f"cell-{i}"  # nbformat 4.5 wants cell ids
     return {
-        "cells": [{"cell_type": "markdown", "metadata": {}, "source": md.splitlines(keepends=True)},
-                  _code_cell(cfg), _code_cell(INSTALL_CELL), _code_cell(PATHS_CELL),
-                  _code_cell(GPU_CELL), _code_cell(RUN_CELL), _code_cell(ZIP_CELL)],
+        "cells": cells,
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
                      "language_info": {"name": "python"}},
         "nbformat": 4, "nbformat_minor": 5,
