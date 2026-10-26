@@ -112,6 +112,23 @@ liars leakcheck --in data/bench/train.jsonl
 
 ## Phase 3 — Zero-shot NLI
 
+What it does: `models/nli_zeroshot.py` scores how strongly each speaker's lines
+contradict the evidence with an off-the-shelf NLI cross-encoder (no training).
+Modes: `pairwise` (each fact vs each message), `joint` (all evidence vs each message),
+`joint_concat` (all evidence vs all of a speaker's messages). Speaker score = max
+contradiction probability, then softmax with a temperature. `fit` picks the best mode
+and temperature on the training folds and writes a per-mode / per-lie_type /
+per-difficulty table to `data/reports/<run>_fold<k>.md`. Pair scores are cached in
+`data/cache/nli_<model hash>.parquet`, so re-runs and other folds are nearly free.
+The contradiction index is read from the checkpoint's `id2label`.
+
+How to run:
+```bash
+liars train --config configs/nli_zeroshot.yaml --debug          # xsmall NLI, CPU, tiny fixture
+liars train --config configs/nli_zeroshot.yaml --test data/bench/test.jsonl   # large, GPU
+liars train --config configs/nli_zeroshot.yaml --set nli.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
+```
+
 ## Phase 4 — Kaggle packaging + first GPU run
 
 ## Phase 5 — Open-LLM zero-shot scoring + model benchmark

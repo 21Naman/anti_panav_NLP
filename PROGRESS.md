@@ -5,9 +5,9 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 3 — not started
-- Last completed phase: 2 (CV, trainer, baselines, leak check, submit, score) — done
-- Next step: start Phase 3 (zero-shot NLI)
+- Current phase: 4 — not started
+- Last completed phase: 3 (zero-shot NLI) — done
+- Next step: start Phase 4 (Kaggle packaging + first GPU run; git push allowed from Phase 4)
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -47,7 +47,7 @@
   accept, and wait.
 - Kaggle GPU: T4 x2 preferred for 4-bit LLMs — weekly quota used so far:
 - GPU hours used in prep (account panavrg):
-- Best result so far: TF-IDF baseline = chance by design (24.65% kfold OOF on bench train, 25.9% bench test) — leak detector, not a real model
+- Best result so far: nli_zeroshot_1027-035542 — kfold — 63.5% OOF — 200-chat CPU subset of bench train (base DeBERTa NLI, joint_concat). TF-IDF leak detector = 24.65% (chance, by design)
 - Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
 - LLM benchmark winner: (model id — zero-shot acc — chats/min on T4)
 - QLoRA time per epoch on T4: (model id — examples — max_len — hours)
@@ -273,3 +273,51 @@ Claude appends one entry per phase using this template:
   not truth. That caught a real flaw in our own generator, which we fixed by making
   honest speakers use every line form liars use.
 - Commit: (see git log, "phase 2: ...")
+
+### Phase 3 — Zero-shot NLI
+- Status: done
+- Date: 2026-10-27
+- Built:
+  - `models/nli_zeroshot.py` -> `NLIScorer` (HF cross-encoder, batched, length-sorted, fp16 on
+    CUDA only), `PairCache` (data/cache/nli_<sha1(model_id)[:10]>.parquet: key=sha1(premise
+    \x1f hypothesis) -> contradiction/entailment/neutral), `label_indices` (reads id2label),
+    `speaker_scores` (pairwise / joint / joint_concat; max contradiction per speaker; 0 if no
+    scoreable line), `NLIZeroShotModel` (fit = choose mode by accuracy + temperature by NLL on
+    training folds; `report()` = per-mode x lie_type / difficulty table).
+  - `device.py` -> cuda if available else cpu, never mps.
+  - trainer: if a model has `report()`, writes `data/reports/<run>_fold<k>.md`.
+  - pyproject: `bitsandbytes; sys_platform == 'linux'` (no Mac support).
+- Files: src/liars/{device.py, models/nli_zeroshot.py}, configs/nli_zeroshot.yaml, tests/test_nli.py.
+- Commands:
+  `liars train --config configs/nli_zeroshot.yaml --debug`
+  `head -n 200 data/bench/train.jsonl > data/bench/train_sub200.jsonl; liars folds --in data/bench/train_sub200.jsonl --k 5`
+  `liars train --config configs/nli_zeroshot.yaml --set data.train=data/bench/train_sub200.jsonl --set data.test=null --set nli.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli --set nli.device=cpu --set nli.batch_size=32`
+- Results:
+  | run | data | time | result |
+  |---|---|---|---|
+  | debug (xsmall NLI, CPU) cold | tiny fixture | 46 s incl. 283 MB download | 90.0% OOF |
+  | debug, 2nd run (cache) | tiny fixture | 5.4 s | same |
+  | base NLI, CPU, kfold | 200 bench train | 4 min 48 s (~14k pairs) | 63.5% OOF |
+  Per-mode on fold-0 training folds (160 chats): joint_concat 0.638 (chosen, T=0.5),
+  joint 0.569, pairwise 0.375. two_step: joint_concat 0.727 vs pairwise 0.364;
+  time_shift: joint_concat 0.769 vs joint 0.385; negation: joint 0.824 best.
+  Full table: data/reports/nli_zeroshot_1027-035542_fold0.md.
+- Done-when checks: debug < 2 min on CPU pass (46 s cold); second run faster pass (5.4 s);
+  per-mode/per-lie_type table on CPU subset pass; pytest 94 passed pass.
+- Decisions & deviations:
+  - Debug model `cross-encoder/nli-deberta-v3-xsmall` (Apache-2.0, 3-class). Large model
+    `MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli` (MIT) is the default; base
+    `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` (MIT) for the CPU subset. None gated.
+  - Default `train.mode: kfold` for NLI (no training + cache = each pair scored once).
+  - Auto-mode candidates order [joint, pairwise, joint_concat]; ties go to the first.
+- Known issues / TODO: pairwise is weak here (single facts vs unrelated messages give
+  spurious contradictions); maybe use (contradiction - entailment) or only pairs sharing an
+  entity — not done (don't over-polish). transformers 5.x warns about torch.jit (harmless).
+- Explain-it-to-me: an NLI model reads a premise and a hypothesis and says whether the
+  premise makes the hypothesis true (entailment), false (contradiction), or neither
+  (neutral). We use "contradiction" as a lie score. Unverifiable chat lines should come out
+  neutral, not contradiction. Pairwise mode checks one fact against one message at a time,
+  so a two-step lie ("I went to the bbq" + later "it was on Monday") is invisible: the "it"
+  message alone has no subject. Joining a speaker's messages (joint_concat) lets the
+  model connect them, which is why it scored 0.73 vs 0.36 on two_step lies.
+- Commit: (see git log, "phase 3: ...")

@@ -1,0 +1,52 @@
+# Zero-shot NLI baseline / ensemble feature. No training: fit picks mode + temperature.
+#   liars train --config configs/nli_zeroshot.yaml --test data/bench/test.jsonl
+#   liars train --config configs/nli_zeroshot.yaml --debug
+# Speed option: --set nli.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
+seed: 42
+
+data:
+  train: data/bench/train.jsonl
+  test: data/bench/test.jsonl
+  folds: null
+
+cv:
+  k: 5
+  seed: 42
+  holdout_fold: 0
+
+train:
+  mode: kfold            # cheap thanks to the pair cache: every pair is scored once
+  refit_full: false
+  inner_val_frac: 0.05
+
+model:
+  name: nli_zeroshot
+
+nli:
+  model_id: MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli   # hub id or local path
+  mode: auto             # auto (best on training folds) | pairwise | joint | joint_concat
+  modes: [joint, pairwise, joint_concat]   # candidates for auto, tie -> first
+  temperatures: [0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+  device: auto           # auto (cuda if available, else cpu; never mps) | cpu | cuda
+  fp16: true             # only used on cuda
+  batch_size: 64
+  max_length: 512
+  evidence_sep: " "
+  message_sep: " "
+  progress: true
+  filter:
+    skip_questions: true
+    min_words: 3
+
+paths:
+  data_dir: data
+
+debug:
+  data:
+    train: tests/fixtures/tiny.jsonl
+    test: tests/fixtures/tiny.jsonl
+  nli:
+    model_id: cross-encoder/nli-deberta-v3-xsmall
+    device: cpu
+    batch_size: 32
+    progress: false
