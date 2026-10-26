@@ -5,9 +5,14 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 0 — not started
-- Last completed phase: none
-- Next step: start Phase 0 (scaffold)
+- Current phase: 1 — not started
+- Last completed phase: 0 (scaffold) — done
+- Next step: start Phase 1 (synthetic generator + benchmark sets)
+- Autonomy (2026-10-27): the user is away and said to keep going phase after phase
+  without waiting for "next", verifying every Done-when check myself. Stop only for
+  things that need the user (gated-model licence, a run > 4 GPU hours, anything
+  irreversible beyond the git/Kaggle permissions in Key facts). Items that need the
+  user's eyes (e.g. Phase 1 sample read-through) are logged as "pending user".
 - Blockers / waiting on: organizers' answer on pseudo-labelling; event start date
 - Standing reminder: at the end of EVERY phase, remind the user to fill in the event
   dates (until "Event dates" below is filled).
@@ -105,3 +110,54 @@ Claude appends one entry per phase using this template:
 ```
 
 <!-- Phase entries start below this line -->
+
+### Phase 0 — Scaffold, schema, CLI
+- Status: done
+- Date: 2026-10-27
+- Built:
+  - `src/liars/schema.py` -> `Message`, `Example` (from_dict/to_dict, strict: unknown keys
+    rejected), `load_jsonl`, `save_jsonl`, `validate(ex) -> list[str]`,
+    `validate_file(path) -> FileReport(n_examples, errors)`. `SPEAKERS = ("A","B","C","D")`.
+  - `src/liars/config.py` -> `load_config(path, overrides)`, `apply_overrides`
+    (`a.b=value`, YAML-typed, creates missing keys), `parse_value`, `config_hash` (sha1, 10
+    chars, key-order independent), `seed_everything` (python/numpy/torch/transformers if installed).
+  - `src/liars/runlog.py` -> `log_run(...)` appends to `data/runs.csv`; columns
+    `run, config_path, config_hash, mode, fold_acc (JSON {fold: acc}), mean_acc, wall_time_s,
+    gpu, timestamp (UTC), notes`; `detect_gpu()` returns CUDA name or "cpu" (never MPS).
+  - `src/liars/stats.py` -> numbers for `liars stats`.
+  - `src/liars/cli.py` -> Typer app `liars`: `validate`, `stats` implemented; synth, adapt,
+    folds, leakcheck, train, predict, score, rules, rules-report, ensemble, analyze, pseudo,
+    submit are placeholders tagged "(todo: Phase N)" that exit with code 2.
+  - `tests/fixtures/tiny.jsonl` -> 32 hand-written chats: 8 per label, Latin square so each
+    label gets each of the 8 lie types (number_change, time_shift, day_change, location_swap,
+    owner_swap, negation, implicit, two_step) exactly once; 6–11 messages; all 4 speakers talk;
+    honest "I think" hedges; honest speakers mention the lied-about entity correctly.
+    meta = {source: fixture, difficulty, lie_type, lie_msg_idx}.
+- Files added: pyproject.toml, .gitignore, README.md, src/liars/{__init__,schema,config,
+  runlog,stats,cli}.py, tests/{conftest,test_schema,test_config,test_runlog,test_cli,
+  test_stats}.py, tests/fixtures/tiny.jsonl
+- Commands:
+  `python3.11 -m venv .venv && .venv/bin/pip install -e ".[dev]"`;
+  `liars validate --in tests/fixtures/tiny.jsonl`; `liars stats --in tests/fixtures/tiny.jsonl`;
+  `.venv/bin/pytest -q`
+- Results: fresh venv install 10 s. Fixture stats: messages/chat 6–11 (mean 7.7),
+  facts/chat 3–4, chat chars p50 267 / p90 305 / p99 384. pytest: 48 passed in 1.6 s.
+- Done-when checks: fresh-venv install pass; `liars --help` lists all 15 commands pass;
+  validate on tiny -> "32 examples, 0 errors" pass; stats sensible pass; pytest (incl. 13
+  bad-example rejection cases + 6 malformed-shape cases) pass.
+- Decisions & deviations:
+  - Speakers must be exactly the letters A–D (spec said "4 unique speakers"); adapters map
+    names to letters, so p_A..p_D always line up.
+  - Extra checks beyond spec: liar must have >= 1 message; `meta.lie_msg_idx` must point at
+    the liar's lines; unknown top-level keys rejected.
+  - `.gitignore` entries anchored to the root (`/data/`, `/models/`) so `src/liars/models/`
+    is not ignored.
+  - Config loader reads `1e-5` as a float (plain PyYAML reads it as a string).
+  - Added `src/liars/stats.py` (not in the layout) to keep cli.py thin.
+- Known issues / TODO: `[nlp]` extra includes bitsandbytes, which may not install on the Mac;
+  install `[nlp]` on Mac without it if needed (Kaggle is Linux, fine there).
+- Explain-it-to-me: every part of the pipeline speaks one data format, so the competition's
+  raw format only needs one adapter. The validator catches broken data (wrong speakers, a
+  liar who never speaks) before any model sees it. The fixture is a tiny, balanced, fully
+  known dataset that every test runs on in seconds.
+- Commit: (see git log, "phase 0: ...")
