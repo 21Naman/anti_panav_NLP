@@ -26,7 +26,8 @@ class LMHandle:
     tokenizer: object
     device: str
     template_kwargs: dict
-    letter_ids: list[int] = field(default_factory=list)
+    letter_ids: list[int] = field(default_factory=list)   # for the answer prefix last used
+    _letter_ids_by_prefix: dict = field(default_factory=dict)
     memo: dict = field(default_factory=dict)   # prompt hash -> raw letter logits
     stats: dict = field(default_factory=lambda: {"n_scored": 0, "seconds": 0.0, "nan_rows": 0,
                                                  "truncated": 0, "max_mem_gb": 0.0})
@@ -67,8 +68,18 @@ def load_lm(lcfg: dict, for_training: bool = False) -> LMHandle:
     if not for_training:
         model.eval()
     h = LMHandle(model_id, model, tok, device, dict(lcfg.get("chat_template_kwargs") or {}))
-    h.letter_ids = letter_token_ids(h, render(h, "Answer with one letter."))
+    set_answer_prefix(h, "")
     return h
+
+
+def set_answer_prefix(h: LMHandle, answer_prefix: str) -> list[int]:
+    """Letter token ids depend on what precedes them ("A" after a newline vs " A" after
+    "Answer:"), so they are computed for the exact answer prefix in use."""
+    if answer_prefix not in h._letter_ids_by_prefix:
+        h._letter_ids_by_prefix[answer_prefix] = letter_token_ids(
+            h, render(h, "Answer with one letter.", answer_prefix=answer_prefix))
+    h.letter_ids = h._letter_ids_by_prefix[answer_prefix]
+    return h.letter_ids
 
 
 def render(h: LMHandle, user_text: str, fewshot: Sequence[tuple[str, str]] = (),
@@ -94,13 +105,16 @@ def _ids(h: LMHandle, text: str) -> list[int]:
 
 def letter_token_ids(h: LMHandle, prompt: str) -> list[int]:
     base = _ids(h, prompt)
+    # After whitespace (e.g. the template's "assistant\n") the answer is "A"; after text
+    # such as "Answer:" a model writes " A".
+    sep = "" if (not prompt or prompt[-1].isspace()) else " "
     out = []
     for letter in SPEAKERS:
-        ids = _ids(h, prompt + letter)
+        ids = _ids(h, prompt + sep + letter)
         if ids[: len(base)] == base and len(ids) == len(base) + 1:
             out.append(ids[-1])
         else:  # boundary merge: fall back to the bare letter token
-            alt = _ids(h, letter)
+            alt = _ids(h, sep + letter)
             if len(alt) != 1:
                 raise ValueError(f"{h.model_id}: letter {letter!r} is not a single token")
             out.append(alt[0])
@@ -112,6 +126,7 @@ def letter_token_ids(h: LMHandle, prompt: str) -> list[int]:
 def prompt_for(h: LMHandle, ex: Example, pcfg: dict, max_len: int,
                fewshot: Sequence[tuple[str, str]] = ()) -> str:
     """Rendered prompt for one example, truncated to max_len tokens."""
+    set_answer_prefix(h, pcfg.get("answer_prefix", ""))
     overhead = len(_ids(h, render(h, "", fewshot, pcfg.get("system"), pcfg.get("answer_prefix", ""))))
     user, dropped = fit_to_budget(ex, pcfg, lambda t: len(_ids(h, t)) + overhead, max_len)
     if dropped:

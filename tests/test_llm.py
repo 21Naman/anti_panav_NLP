@@ -65,3 +65,15 @@ def test_tiny_real_model_runs(tiny):
     assert len(set(m.h.letter_ids)) == 4
     assert "chats per minute" in m.report()
     assert m.h.stats["truncated"] > 0  # max_len 150 forces truncation with a few-shot example
+
+
+def test_letter_ids_follow_answer_prefix():
+    try:
+        from liars.llm import load_lm, set_answer_prefix
+        h = load_lm({"model_id": TINY_LM, "device": "cpu", "load_in_4bit": False})
+    except Exception as e:
+        pytest.skip(f"tiny model unavailable: {e}")
+    plain = list(set_answer_prefix(h, ""))
+    spaced = list(set_answer_prefix(h, "Answer:"))
+    toks = h.tokenizer.convert_ids_to_tokens(spaced)
+    assert plain != spaced and all(t.startswith(("Ġ", " ", "▁")) for t in toks)

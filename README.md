@@ -151,6 +151,27 @@ python scripts/kaggle_run.py fetch --name nli-bench
 
 ## Phase 5 — Open-LLM zero-shot scoring + model benchmark
 
+What it does:
+- `prompt.py` — numbered evidence + "S: text" chat + the question; truncation keeps all
+  evidence and drops first the messages furthest from any other message about the same
+  entity (small talk goes first). Shared with Phase 6.
+- `llm.py` — load an instruct LLM (4-bit NF4 + fp16 compute on CUDA, fp32 on CPU, never
+  MPS), render with the model's chat template, find the A/B/C/D token ids by diffing the
+  rendered prompt with and without the letter, score batches (left padding, last-position
+  logits only), count fp16 NaN rows, track chats/min and GPU memory.
+- `augment.py` — `permute_speakers`, `shuffle_evidence`, `tta_variants` (cyclic shifts
+  first so every speaker sits in every letter slot), `map_back`.
+- `models/llm_zeroshot.py` — softmax over the 4 letter logits, averaged over TTA
+  permutations; `fit` picks few-shot examples and a temperature on the training folds;
+  report with chats/min, memory, NaN rows, truncation.
+
+How to run:
+```bash
+liars train --config configs/llm_zeroshot.yaml --debug                     # Qwen2.5-0.5B on CPU
+liars train --config configs/llm_zeroshot.yaml --test data/bench/test.jsonl  # Kaggle T4, holdout
+liars train --config configs/llm_zeroshot.yaml --set llm.model_id=Qwen/Qwen3-14B --set augment.tta_n=2
+```
+
 ## Phase 6 — QLoRA open-LLM classifier
 
 ## Phase 7 — DeBERTa focus-marked multiple choice
