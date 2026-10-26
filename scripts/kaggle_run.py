@@ -67,20 +67,27 @@ def find_input(slug):
 hf = secret("HF_TOKEN")
 if hf:
     os.environ["HF_TOKEN"] = hf
+    print("Kaggle secret HF_TOKEN: available")
 gh = secret("GH_TOKEN")
+if gh:
+    print("Kaggle secret GH_TOKEN: available")
 shutil.rmtree(WORK, ignore_errors=True)
 code_source = None
-if gh:
+if gh and CODE_MODE in ("auto", "git"):
     r = subprocess.run(["git", "clone", "-q", f"https://x-access-token:{gh}@github.com/{REPO}.git", WORK],
                        capture_output=True, text=True)
-    if r.returncode == 0:
+    ok = r.returncode == 0
+    if ok:
         subprocess.run(["git", "-C", WORK, "remote", "set-url", "origin", f"https://github.com/{REPO}.git"], check=True)
-        subprocess.run(["git", "-C", WORK, "checkout", "-q", REF], check=True)
+        ok = subprocess.run(["git", "-C", WORK, "checkout", "-q", REF], capture_output=True).returncode == 0
+    if ok:
         code_source = "git " + subprocess.run(["git", "-C", WORK, "rev-parse", "--short", "HEAD"],
                                               capture_output=True, text=True).stdout.strip()
     else:
-        print("git clone failed (token or repo access); trying the code dataset")  # never echo the URL
+        print(f"git clone/checkout of {REF} failed")  # never echo the clone URL (it holds the token)
         shutil.rmtree(WORK, ignore_errors=True)
+        if CODE_MODE == "git":
+            raise RuntimeError("CODE_MODE='git' but the clone failed")
 if code_source is None:
     src = find_input(CODE_DATASET)
     tars = glob.glob(src + "/**/liars-src.tar.gz", recursive=True)
@@ -90,7 +97,8 @@ if code_source is None:
     else:
         root = os.path.dirname(glob.glob(src + "/**/pyproject.toml", recursive=True)[0])
         shutil.copytree(root, WORK)
-    code_source = "dataset " + CODE_DATASET
+    commit = glob.glob(src + "/**/COMMIT", recursive=True)
+    code_source = f"dataset {CODE_DATASET} @ " + (open(commit[0]).read().strip() if commit else "?")
 print("code source:", code_source)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", WORK + "[nlp]"], check=True)
 '''
@@ -146,12 +154,13 @@ def _code_cell(src: str) -> dict:
 
 def build_notebook(commands: list[str], ref: str = "main", repo: str = REPO,
                    code_dataset: str = CODE_DATASET,
-                   data_datasets: list[str] | None = None) -> dict:
+                   data_datasets: list[str] | None = None, code_mode: str = "auto") -> dict:
     data_datasets = DEFAULT_DATASETS if data_datasets is None else data_datasets
     cfg = (
         "# Settings (edit COMMANDS for a manual run)\n"
         f"REPO = {repo!r}\n"
         f"REF = {ref!r}  # branch, tag or commit\n"
+        f"CODE_MODE = {code_mode!r}  # auto (git if GH_TOKEN works, else dataset) | git | dataset\n"
         f"CODE_DATASET = {code_dataset!r}  # fallback when the GH_TOKEN secret is not attached\n"
         f"DATA_DATASETS = {data_datasets!r}\n"
         f"OUTPUT_ITEMS = {OUTPUT_ITEMS!r}\n"
@@ -235,23 +244,27 @@ def cmd_data(a) -> None:
 def cmd_code(a) -> None:
     subprocess.run(["bash", str(ROOT / "scripts" / "build_wheel.sh")], check=True)
     tar = ROOT / "build" / "kaggle_code" / "liars-src.tar.gz"
+    commit = ROOT / "build" / "kaggle_code" / "COMMIT"
+    commit.write_text(git("rev-parse", "HEAD") + "\n")
     wheels = list((ROOT / "dist").glob("liars-*.whl"))
-    upload_dataset(a.slug, {tar: tar.name, **{w: w.name for w in wheels}},
+    upload_dataset(a.slug, {tar: tar.name, commit: commit.name, **{w: w.name for w in wheels}},
                    f"code {git('rev-parse', '--short', 'HEAD')}")
+    print(f"code dataset {a.slug} = commit {git('rev-parse', '--short', 'HEAD')} (committed files only)")
 
 
 def cmd_push(a) -> None:
     if git("status", "--porcelain", "--untracked-files=no"):
         print("WARNING: uncommitted changes are NOT in the run (it uses the pushed commit).")
     ref = a.ref or git("rev-parse", "HEAD")
-    if not a.ref and not git("branch", "-r", "--contains", ref):
-        raise SystemExit("HEAD is not pushed to origin; run `git push` first (Kaggle clones from GitHub).")
+    if a.code != "dataset" and not a.ref and not git("branch", "-r", "--contains", ref):
+        raise SystemExit("HEAD is not pushed to origin. Either `git push`, or upload the code "
+                         "dataset (`kaggle_run.py code`) and push with --code dataset.")
     user, slug = kaggle_user(), kernel_slug(a.name)
     d = BUILD / a.name
     shutil.rmtree(d, ignore_errors=True)
     d.mkdir(parents=True)
     datasets = a.datasets or DEFAULT_DATASETS
-    nb = build_notebook(a.cmd, ref=ref, data_datasets=datasets)
+    nb = build_notebook(a.cmd, ref=ref, data_datasets=datasets, code_mode=a.code)
     (d / "run.ipynb").write_text(json.dumps(nb, indent=1))
     meta = {
         "id": f"{user}/{slug}", "title": slug, "code_file": "run.ipynb",
@@ -368,6 +381,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ref", default=None, help="git ref (default: HEAD, must be pushed)")
     p.add_argument("--datasets", nargs="*", default=None)
     p.add_argument("--accelerator", default=ACCELERATOR)
+    p.add_argument("--code", choices=["auto", "git", "dataset"], default="auto",
+                   help="where the notebook gets the code (dataset = private liars-code snapshot)")
     p.add_argument("--wait", action="store_true")
     p.set_defaults(fn=cmd_push)
     for name, fn in (("status", cmd_status), ("wait", cmd_wait), ("fetch", cmd_fetch)):
