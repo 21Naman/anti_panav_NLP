@@ -14,6 +14,7 @@ app = typer.Typer(
     help="Liar's Chatroom pipeline. Every command reads/writes the canonical JSONL schema.",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_enable=False,  # short plain tracebacks
 )
 
 InPath = typer.Option(..., "--in", exists=True, dir_okay=False, help="Canonical JSONL file.")
@@ -96,21 +97,127 @@ def synth(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def folds(
+    in_path: Path = InPath,
+    k: int = typer.Option(5, "--k"),
+    seed: int = typer.Option(42, "--seed"),
+    out: Path = typer.Option(None, "--out", help="Default: data/canonical/folds_<stem>.csv"),
+) -> None:
+    """Assign stratified CV folds (by label, and meta.source when present)."""
+    from collections import Counter
+
+    from liars.cv import assign_folds, folds_path_for, save_folds
+    from liars.paths import get_paths
+
+    examples = load_jsonl(in_path)
+    fold_map = assign_folds(examples, k, seed)
+    path = out or folds_path_for(in_path, get_paths().canonical)
+    save_folds(fold_map, path)
+    label = {ex.id: ex.label for ex in examples}
+    typer.echo(f"{len(fold_map)} examples, k={k}, seed={seed} -> {path}")
+    for f in range(k):
+        ids = [i for i, v in fold_map.items() if v == f]
+        dist = Counter(label[i] for i in ids)
+        typer.echo(f"  fold {f}: {len(ids):>6}  " + "  ".join(f"{s} {dist[s]}" for s in sorted(dist)))
+
+
+@app.command()
+def train(
+    config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+    test: Path = typer.Option(None, "--test", help="Canonical test file (overrides data.test)."),
+    debug: bool = typer.Option(False, "--debug", help="Tiny data/model on CPU; outputs to data/debug/."),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Train a model from a config (train.mode: kfold or holdout)."""
+    from liars.trainer import run_training
+
+    cfg = load_config(config, set_)
+    run_training(cfg, config, test, debug, log=typer.echo)
+
+
+@app.command()
+def score(
+    preds: Path = typer.Option(..., "--preds", exists=True, dir_okay=False),
+    labels: Path = typer.Option(..., "--labels", exists=True, dir_okay=False,
+                                help="CSV id,label[,lie_type,...] or labelled canonical JSONL."),
+) -> None:
+    """Accuracy of a prediction file against known labels (synthetic / train only)."""
+    from liars.preds import load_preds
+    from liars.score import format_score, load_labels
+    from liars.score import score as score_fn
+
+    typer.echo(format_score(score_fn(load_preds(preds), load_labels(labels))))
+
+
+@app.command()
+def leakcheck(
+    in_path: Path = InPath,
+    config: Path = typer.Option(Path("configs/leakcheck.yaml"), "--config"),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Look for label skews, liar-only templates and other generator quirks (TRAIN only)."""
+    from liars.leakcheck import run_leakcheck
+    from liars.paths import get_paths
+
+    cfg = load_config(config, set_)
+    model_cfg = load_config(cfg["baseline_config"])
+    examples = load_jsonl(in_path)
+    md, summary = run_leakcheck(examples, cfg["leakcheck"], model_cfg, cfg["seed"], in_path.stem)
+    out = get_paths(cfg).reports / f"leakcheck_{in_path.stem}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md, encoding="utf-8")
+    typer.echo(f"{summary['n']} chats. TF-IDF OOF accuracy {summary['tfidf_oof_acc']:.4f}; "
+               f"liar-only templates: {summary['liar_only_templates']}")
+    for rule, acc in summary["rules"].items():
+        typer.echo(f"  rule {rule:<26} {acc:.3f}")
+    typer.echo("ALERTS:" if summary["alerts"] else "ALERTS: none")
+    for a in summary["alerts"]:
+        typer.echo(f"  - {a}")
+    typer.echo(f"report -> {out}")
+
+
+@app.command()
+def submit(
+    preds: Path = typer.Option(..., "--preds", exists=True, dir_okay=False),
+    out: Path = typer.Option(..., "--out", help="e.g. data/subs/NAME.csv"),
+    test: Path = typer.Option(None, "--test", help="Canonical test file (default: config)."),
+    sample: Path = typer.Option(None, "--sample", help="sample_submission.csv to match."),
+    config: Path = typer.Option(Path("configs/submission.yaml"), "--config"),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Write a validated submission CSV."""
+    import pandas as pd
+
+    from liars.preds import load_preds
+    from liars.submit import make_submission, validate_submission, write_submission
+
+    cfg = load_config(config, set_)
+    scfg = cfg["submission"]
+    test_examples = load_jsonl(test or scfg["test"])
+    sample_df = pd.read_csv(sample, dtype={scfg["id_column"]: str}) if sample else None
+    sub = make_submission(load_preds(preds), test_examples, scfg, sample_df)
+    errors = validate_submission(sub, test_examples, scfg, sample_df)
+    if errors:
+        for e in errors:
+            typer.echo(f"  INVALID: {e}")
+        raise typer.Exit(code=1)
+    path = write_submission(sub, out)
+    dist = sub[scfg["label_column"]].value_counts().sort_index()
+    typer.echo(f"valid submission: {len(sub)} rows, columns {list(sub.columns)} -> {path}")
+    typer.echo("  predicted label counts: " + "  ".join(f"{k} {v}" for k, v in dist.items()))
+
+
 # Commands that later phases implement. They accept any arguments and exit with
 # code 2 so scripts never mistake a placeholder for a successful run.
 PLACEHOLDERS: dict[str, tuple[int, str]] = {
     "adapt": (9, "Convert raw competition files to canonical JSONL."),
-    "folds": (2, "Assign stratified CV folds."),
-    "leakcheck": (2, "Look for label leaks and generator quirks."),
-    "train": (2, "Train a model from a config (kfold or holdout)."),
-    "predict": (2, "Predict with a trained run."),
-    "score": (2, "Score predictions against hidden labels."),
+    "predict": (6, "Predict with a saved model run."),
     "rules": (8, "Compute rule features."),
     "rules-report": (8, "Coverage and precision of each rule."),
     "ensemble": (8, "Combine runs (mean / weighted / stack)."),
     "analyze": (8, "HTML error-analysis report for a run."),
     "pseudo": (10, "Pseudo-label confident test predictions (off by default)."),
-    "submit": (2, "Write a validated submission CSV."),
 }
 
 

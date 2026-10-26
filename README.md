@@ -79,6 +79,37 @@ liars synth --n 1000 --seed 303 --difficulty med,hard --pack alt --id-prefix te_
 
 ## Phase 2 — CV, trainer, baselines, leak check, submit, score
 
+What it does:
+- `cv.py` — stratified folds (label, + meta.source). `liars folds` writes
+  `data/canonical/folds_<train stem>.csv`; every run reads it.
+- `trainer.py` (`liars train`) — `train.mode: kfold` (OOF on every row, test preds
+  averaged over folds) or `holdout` (fit on folds != `cv.holdout_fold`, predict that
+  fold + test; models with `uses_val` get an inner split of the training folds;
+  `train.refit_full` retrains on 100% for test preds). Writes `data/oof/<run>.parquet`
+  (id, fold, label, p_A..p_D), `data/preds/<run>.parquet`, `data/runs/<run>.yaml`, and a
+  row in `data/runs.csv`. `--debug` uses the tiny fixture and writes to `data/debug/`.
+- `models/base.py` (interface), `models/baselines.py` (majority, TF-IDF+LR scored per
+  speaker, softmax over the 4).
+- `score.py` (`liars score`) — accuracy, by lie_type / difficulty / true label. Labels
+  from a CSV or a labelled canonical JSONL (so OOF files can be scored too).
+- `leakcheck.py` (`liars leakcheck`) — `data/reports/leakcheck_<name>.md`: label and
+  position skew, one-feature rules, chi² n-grams of liar-speaker lines, masked templates
+  (flags liar-only ones), evidence overlap, TF-IDF OOF accuracy + top features, alerts.
+- `submit.py` (`liars submit`) — preds -> CSV per `configs/submission.yaml`
+  (letter | int [as_listed | first_appearance] | name), optional `--sample` to match
+  columns / ids / order, validated before writing. `decode_label` is the inverse.
+
+How to run (bench):
+```bash
+liars folds --in data/bench/train.jsonl --k 5
+liars train --config configs/baselines.yaml --test data/bench/test.jsonl
+liars train --config configs/baselines.yaml --set train.mode=holdout --set train.refit_full=true
+liars score --preds data/preds/<run>.parquet --labels data/bench/test_labels.csv
+liars score --preds data/oof/<run>.parquet --labels data/bench/train.jsonl
+liars submit --preds data/preds/<run>.parquet --out data/subs/<name>.csv [--sample sample_submission.csv]
+liars leakcheck --in data/bench/train.jsonl
+```
+
 ## Phase 3 — Zero-shot NLI
 
 ## Phase 4 — Kaggle packaging + first GPU run

@@ -5,9 +5,9 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 2 — not started
-- Last completed phase: 1 (synthetic generator + bench sets) — done (sample read-through pending user)
-- Next step: start Phase 2 (CV, trainer, baselines, leak check, submit, score)
+- Current phase: 3 — not started
+- Last completed phase: 2 (CV, trainer, baselines, leak check, submit, score) — done
+- Next step: start Phase 3 (zero-shot NLI)
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -47,7 +47,7 @@
   accept, and wait.
 - Kaggle GPU: T4 x2 preferred for 4-bit LLMs — weekly quota used so far:
 - GPU hours used in prep (account panavrg):
-- Best result so far: (run name — mode — accuracy — on which data)
+- Best result so far: TF-IDF baseline = chance by design (24.65% kfold OOF on bench train, 25.9% bench test) — leak detector, not a real model
 - Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
 - LLM benchmark winner: (model id — zero-shot acc — chats/min on T4)
 - QLoRA time per epoch on T4: (model id — examples — max_len — hours)
@@ -222,3 +222,54 @@ Claude appends one entry per phase using this template:
   cover) stop a model from winning with shortcuts like "whoever mentions the evidence
   entity" or "whoever says not".
 - Commit: (see git log, "phase 1: ...")
+- Correction 2026-10-27 (during Phase 2): the Phase 2 leak check found the generator
+  leaked (TF-IDF 38.2% OOF; anchors, "got my refund", hedged implicit lies, out-of-range
+  lie times like "opens at 12"). Fixed in synth code (see Phase 2 entry); bench sets were
+  REGENERATED with the same commands/seeds. Old numbers above (liar line 28.7 vs 27.3
+  chars etc.) refer to the old generator.
+
+### Phase 2 — CV, trainer, baselines, leak check, submit, score
+- Status: done
+- Date: 2026-10-27
+- Built: `paths.py` (all outputs under paths.data_dir), `preds.py` (PROB_COLS, make/check/
+  save/load preds, softmax, argmax), `cv.py`, `models/{base,__init__,baselines}.py`
+  (registry: majority, tfidf_lr), `trainer.py`, `score.py`, `leakcheck.py`, `submit.py`;
+  CLI `folds`, `train`, `score`, `leakcheck`, `submit` (predict -> Phase 6 placeholder).
+  Configs: `configs/baselines.yaml`, `configs/leakcheck.yaml`, `configs/submission.yaml`.
+- Generator fix (Phase 1 code) after the leak check fired:
+  - Lie values drawn like true values: wrong times stay in the entity type's hour range,
+    wrong weather weighted like real weather, `happened` lies state "went ahead" ~80% of
+    the time like honest lines (`pick_target`).
+  - Every turn first draws an honest kind; the lie replaces one of the liar's CLAIM turns.
+  - "Cover" lines (`cover_rate`, 1.0 for med/hard): each honest speaker also says one TRUE
+    line in the lie's form (same attribute / "not" / implied / anchor+"it" pair).
+  - Hedges never wrap implicit lines (lie or honest).
+- Results (bench, all CPU, seconds):
+  | run | mode | held-out acc | bench test acc |
+  |---|---|---|---|
+  | tfidf_lr (old generator) | kfold | 0.3820 | — (leak) |
+  | tfidf_lr baselines_1027-035007 | kfold | 0.2465 | 0.2590 |
+  | tfidf_lr baselines_1027-035010 | holdout + refit_full | 0.2700 (fold 0) | 0.2690 |
+  | majority baselines_1027-035011 | kfold | 0.2500 | — |
+  Leak check after fix: TF-IDF OOF 0.2465, 0 liar-only templates, no alerts; best
+  one-feature rule "highest evidence overlap" 0.287 (legit: lies are about evidence).
+- Done-when checks: folds -> train -> score -> submit on bench in kfold AND holdout pass
+  (letter, int/first_appearance and name submissions validated); runs.csv per-fold accs
+  pass; leakcheck runs, leak found and FIXED in generator pass; pytest 87 passed (2.0 s) pass.
+- Decisions & deviations:
+  - OOF parquet also stores `label` (spec: id, fold, p_*) so ensemble/analysis are self-contained.
+  - Inner early-stopping split is used in BOTH modes (only for models with uses_val), never
+    the held-out fold, so OOF stays honest in kfold too.
+  - `--debug` writes to `<data_dir>/debug/` (own runs.csv) so debug runs never mix with real ones.
+  - `liars predict` deferred to Phase 6 (sklearn baselines are not saved).
+  - Leak-check alert rules: TF-IDF > 0.35; any one-feature rule > chance + 0.05; label or
+    liar-position share > 0.30; template used >= 10 times with liar share >= 0.95.
+- Known issues / TODO: the TF-IDF baseline ignores evidence (by design: leak detector).
+  `configs/` paths are relative to the repo root.
+- Explain-it-to-me: we never judge a model on data it trained on: each chat gets a fold,
+  and a model only predicts folds it did not see (kfold), or one held-out fold
+  (holdout, for expensive models). The leak check trains a model that cannot see the
+  evidence at all; if it still beats chance, the data gives the liar away through style,
+  not truth. That caught a real flaw in our own generator, which we fixed by making
+  honest speakers use every line form liars use.
+- Commit: (see git log, "phase 2: ...")

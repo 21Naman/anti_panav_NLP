@@ -12,6 +12,7 @@ location / owner / companion = a name string.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -151,22 +152,18 @@ def alternative_value(rng: random.Random, world: World, wcfg: dict, lcfg: dict,
     if attr == "day":
         return rng.choice([d for d in range(N_DAYS) if d != true])
     if attr == "time":
+        # Same hour range as real values of this entity type (no 'opens at 12' that only
+        # lies would produce), shifted by time_shift_hours.
+        etype = world.get(eid).type
+        h_lo, h_hi = wcfg["event_hours"] if etype == "event" else wcfg["open_hours"]
         lo, hi = lcfg["time_shift_hours"]
-        for _ in range(50):
-            shift = rng.randint(lo, hi) * rng.choice([-1, 1]) * 60
-            if rng.random() < lcfg["time_change_minutes_rate"]:
-                shift += rng.choice(wcfg["minutes"]) - true % 60
-            new = true + shift
-            lo_h, hi_h = lcfg["time_bounds_hours"]
-            if lo_h * 60 <= new <= hi_h * 60 + 59 and new != true:
-                return new
-        # Fallback: nearest whole-hour shift that stays in bounds (never 12 h, which
-        # would be ambiguous in formats without am/pm).
-        lo_h, hi_h = lcfg["time_bounds_hours"]
-        for shift in (60, -60, 120, -120):
-            if lo_h * 60 <= true + shift <= hi_h * 60 + 59:
-                return true + shift
-        raise ValueError(f"cannot shift time {true}")
+        minute_w = Counter(wcfg["minutes"])
+        cands = [h * 60 + m for h in range(h_lo, h_hi + 1) for m in minute_w
+                 if lo * 60 <= abs(h * 60 + m - true) <= hi * 60 + 59]
+        if not cands:
+            cands = [h * 60 + m for h in range(h_lo, h_hi + 1) for m in minute_w
+                     if h * 60 + m != true]
+        return rng.choices(cands, weights=[minute_w[c % 60] for c in cands])[0]
     if attr == "price":
         return rng.choice([p for p in wcfg["prices"] if p != true])
     if attr == "count":
@@ -175,7 +172,8 @@ def alternative_value(rng: random.Random, world: World, wcfg: dict, lcfg: dict,
         options = [c for c in range(lo, hi + 1) if abs(c - true) >= gap]
         return rng.choice(options)
     if attr == "weather":
-        return rng.choice([w for w in wcfg["weather"] if w != true])
+        opts = [(w, p) for w, p in zip(wcfg["weather"], wcfg["weather_weights"]) if w != true]
+        return rng.choices([o[0] for o in opts], weights=[o[1] for o in opts])[0]
     if attr == "happened":
         return not true
     if attr == "location":

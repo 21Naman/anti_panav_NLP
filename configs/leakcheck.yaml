@@ -1,0 +1,19 @@
+# `liars leakcheck --in FILE` settings.
+seed: 42
+baseline_config: configs/baselines.yaml   # TF-IDF settings come from here
+
+leakcheck:
+  k: 5
+  top_n: 30
+  ngram_range: [1, 3]
+  ngram_min_df: 5
+  template_min_count: 10
+  liar_only_share: 0.95        # template flagged if this share of its uses are by liars
+  evidence_function_word_freq: 0.2   # evidence words in >= this share of chats are kept
+                                     # when masking templates ("the", "at", "dollars")
+  tfidf_alert_acc: 0.35
+  rule_alert_margin: 0.05      # alert if a one-feature rule beats chance by this much
+  skew_alert_share: 0.30       # alert if any label / liar position has more than this share
+
+paths:
+  data_dir: data

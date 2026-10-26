@@ -1,0 +1,11 @@
+# How `liars submit` writes the competition CSV. Set on competition day to match
+# sample_submission.csv exactly (the adapter round-trip test checks it).
+submission:
+  id_column: id
+  label_column: label
+  label_format: letter       # letter | int | name
+  int_order: as_listed       # as_listed | first_appearance (which speaker is 0..3)
+  test: data/bench/test.jsonl   # canonical test file the predictions belong to
+
+paths:
+  data_dir: data

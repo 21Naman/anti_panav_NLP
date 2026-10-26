@@ -1,0 +1,47 @@
+# TF-IDF + logistic regression baseline (leak detector) or majority class.
+#   liars folds --in data/bench/train.jsonl --k 5
+#   liars train --config configs/baselines.yaml --test data/bench/test.jsonl
+#   liars train --config configs/baselines.yaml --set model.name=majority
+seed: 42
+
+data:
+  train: data/bench/train.jsonl
+  test: data/bench/test.jsonl
+  folds: null            # null = data/canonical/folds_<train stem>.csv (from `liars folds`)
+
+cv:
+  k: 5
+  seed: 42
+  holdout_fold: 0
+
+train:
+  mode: kfold            # kfold | holdout
+  refit_full: false      # holdout only: retrain on 100% for test preds
+  inner_val_frac: 0.05   # early-stopping split carved from the training folds
+
+model:
+  name: tfidf_lr         # tfidf_lr | majority
+  tfidf:
+    ngram_range: [1, 2]
+    min_df: 2
+    max_features: 50000
+    sublinear_tf: true
+    lowercase: true
+  lr:
+    C: 1.0
+    max_iter: 2000
+  features:
+    counts: true         # messages, share of messages, mean line length
+    position: true       # first-appearance rank, speaks first / last
+    letter: true         # which letter (A-D) the speaker is
+
+paths:
+  data_dir: data
+
+debug:                   # merged in by --debug (outputs go to data/debug/)
+  data:
+    train: tests/fixtures/tiny.jsonl
+    test: tests/fixtures/tiny.jsonl
+  model:
+    tfidf:
+      min_df: 1

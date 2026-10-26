@@ -27,7 +27,10 @@ EXPLICIT_ATTRS = {
     "owner_swap": {"owner"},
 }
 IMPLICIT_ATTRS = {"weather", "happened"}
-CLAIM_KINDS = {"restate_ev", "restate_world", "neg_true", "same_entity", "anaphor"}
+# Kinds that state a value and may be hedged ("I think ..."). Lies and honest lines share
+# the same treatment, so hedging never marks a line as honest or as a lie.
+CLAIM_KINDS = {"restate_ev", "restate_world", "neg_true", "same_entity", "anaphor", "cover",
+               "lie_claim", "lie_anaphor"}
 DIFFICULTIES = ("easy", "med", "hard")
 
 
@@ -154,24 +157,27 @@ def make_lie(ctx: _Ctx, lie_type: str) -> list[tuple[str, str, list[Claim]]]:
     true = ent.attrs[attr]
     if lie_type in EXPLICIT_ATTRS:
         clause, c = claim_clause(ctx, ent, attr, ctx.alt(eid, attr), True)
-        return [("lie", clause, [c])]
+        return [("lie_claim", clause, [c])]
     if lie_type == "negation":
         if attr == "happened":
             clause, c = claim_clause(ctx, ent, attr, not true, True)
         else:  # "X is not <true value>"
             clause, c = claim_clause(ctx, ent, attr, true, False)
-        return [("lie", clause, [c])]
+        return [("lie_claim", clause, [c])]
     if lie_type == "implicit":
         if attr == "happened":
             wrong = not true
         else:
-            options = [w for w in ctx.wcfg["weather"] if w != true and has_implicit(ctx.pack, ent, attr, w)]
-            wrong = ctx.rng.choice(options)
+            # Wrong weather drawn like real weather, so lie values look like honest ones.
+            wcfg = ctx.wcfg
+            options = [(w, wt) for w, wt in zip(wcfg["weather"], wcfg["weather_weights"])
+                       if w != true and has_implicit(ctx.pack, ent, attr, w)]
+            wrong = ctx.rng.choices([o[0] for o in options], weights=[o[1] for o in options])[0]
         clause, c = implicit_clause(ctx, ent, attr, wrong)
-        return [("lie", clause, [c])]
+        return [("lie_implicit", clause, [c])]
     if lie_type == "two_step":
         anaphor, c = anaphor_clause(ctx, ent, attr, ctx.alt(eid, attr))
-        return [("anchor", anchor_clause(ctx, ent), []), ("lie", anaphor, [c])]
+        return [("anchor", anchor_clause(ctx, ent), []), ("lie_anaphor", anaphor, [c])]
     raise ValueError(lie_type)
 
 
@@ -257,6 +263,47 @@ def honest_pair(ctx: _Ctx, speaker: str) -> list[tuple[str, str, list[Claim]]] |
     return [("anchor", anchor_clause(ctx, ent), []), ("anaphor", anaphor, [c])]
 
 
+def cover_line(ctx: _Ctx, speaker: str, lie_type: str) -> tuple[str, str, list[Claim]] | None:
+    """An honest line in the same FORM as the lie (same attribute, same polarity or
+    implicit style), so line forms are equally common for liars and honest speakers.
+    Not used for two_step (its cover is an honest anchor + 'it' pair)."""
+    rng, world, preset = ctx.rng, ctx.world, ctx.preset
+    t_eid, attr = ctx.target
+    same_attr = [f for f in world.facts() if f[1] == attr and _allowed(ctx, speaker, f)]
+    if lie_type == "implicit":
+        same_attr = [f for f in same_attr
+                     if has_implicit(ctx.pack, world.get(f[0]), attr, world.value(*f))]
+    elif lie_type == "negation" and attr != "happened":
+        same_attr = [f for f in same_attr if _neg_ok(ctx, f)]
+    if not same_attr:
+        return None
+    if ctx.target in same_attr and rng.random() < preset["cover_same_fact_rate"]:
+        fact = ctx.target
+    else:
+        ev = [f for f in same_attr if f in ctx.evidence_keys and f != ctx.target]
+        rest = [f for f in same_attr if f != ctx.target] or same_attr
+        fact = rng.choice(ev if ev and rng.random() < preset["cover_evidence_rate"] else rest)
+    ent = world.get(fact[0])
+    true = world.value(*fact)
+    if lie_type == "implicit":
+        clause, c = implicit_clause(ctx, ent, attr, true)
+        return "implicit_true", clause, [c]
+    if lie_type == "negation" and attr != "happened":
+        clause, c = claim_clause(ctx, ent, attr, ctx.alt(*fact), False)
+        return "cover", clause, [c]
+    clause, c = claim_clause(ctx, ent, attr, true, True)
+    return "cover", clause, [c]
+
+
+def pick_target(ctx_rng: random.Random, targets: list[tuple[str, str]], world: World,
+                p_cancelled: float) -> tuple[str, str] | None:
+    """Choose the lie target. A lie about `happened` states "it went ahead" about as often
+    as honest lines do (most events go ahead), so the stated value carries no signal."""
+    stated_happened = ctx_rng.random() >= p_cancelled
+    ok = [t for t in targets if t[1] != "happened" or world.value(*t) != stated_happened]
+    return ctx_rng.choice(ok) if ok else None
+
+
 # ---------------------------------------------------------------------------
 # Chat assembly
 # ---------------------------------------------------------------------------
@@ -287,7 +334,7 @@ def _pick_close_pair(rng: random.Random, pairs: list[tuple[int, int]]) -> tuple[
 
 def _finish(ctx: _Ctx, kind: str, clause: str) -> str:
     rng, preset = ctx.rng, ctx.preset
-    if kind in CLAIM_KINDS or kind == "lie":
+    if kind in CLAIM_KINDS:
         if rng.random() < preset["hedge_rate"]:
             clause = rng.choice(ctx.pack["hedges"]).format(c=clause)
     if rng.random() < preset["filler_rate"]:
@@ -311,9 +358,9 @@ def generate_example(
     ex_id: str, label: str, lie_type: str, difficulty: str,
 ) -> GenRecord | None:
     targets = eligible_targets(world, pack, lie_type)
-    if not targets:
+    target = pick_target(rng, targets, world, cfg["world"]["p_cancelled"]) if targets else None
+    if target is None:
         return None
-    target = rng.choice(targets)
 
     # Evidence: the lie target plus random other facts, shuffled.
     facts = world.facts()
@@ -329,34 +376,54 @@ def generate_example(
     slots: dict[str, list[int]] = {s: [i for i, x in enumerate(seq) if x == s] for s in SPEAKERS}
     plan: dict[int, tuple[str, str, list[Claim]]] = {}
 
-    # Lie line(s) in the liar's own slots (two_step uses two consecutive liar turns).
-    lie_items = make_lie(ctx, lie_type)
-    liar_slots = slots[label]
-    if len(lie_items) == 2:
-        pairs = list(zip(liar_slots, liar_slots[1:]))
-        a, b = _pick_close_pair(rng, pairs)
-        lie_idx = [a, b]
-    else:
-        lie_idx = [rng.choice(liar_slots)]
-    for i, item in zip(lie_idx, lie_items):
-        plan[i] = item
-
-    # Optional honest anchor+anaphor pair (a hard negative for two_step).
-    if rng.random() < preset["honest_pair_rate"]:
-        candidates = []
-        for s in SPEAKERS:
-            free = [i for i in slots[s] if i not in plan]
-            candidates += [(s, a, b) for a, b in zip(free, free[1:])]
-        if candidates:
-            weights = [1 / (b - a) for _, a, b in candidates]
-            s, a, b = rng.choices(candidates, weights=weights)[0]
-            pair = honest_pair(ctx, s)
-            if pair:
-                plan[a], plan[b] = pair
-
-    # Honest turns. Retry a few times to avoid identical lines and a speaker
-    # repeating a fact they already stated.
+    # Every turn first draws an honest kind. The lie then replaces one of the liar's
+    # CLAIM turns, and each honest speaker gets a cover line of the same form in one
+    # of their claim turns, so the mix of line types does not depend on who lies.
     kinds = preset["kinds"]
+    drawn = {i: rng.choices(list(kinds), weights=list(kinds.values()))[0] for i in range(n_msgs)}
+
+    def free(s: str) -> list[int]:
+        return [i for i in slots[s] if i not in plan]
+
+    def claim_turn(s: str) -> int:
+        f = free(s)
+        claims = [i for i in f if drawn[i] in CLAIM_KINDS]
+        return rng.choice(claims or f)
+
+    lie_items = make_lie(ctx, lie_type)
+    if lie_type == "two_step":
+        for s in SPEAKERS:
+            pairs = list(zip(free(s), free(s)[1:]))
+            if s == label:
+                a, b = _pick_close_pair(rng, pairs)
+                plan[a], plan[b] = lie_items
+                lie_idx = [a, b]
+            elif pairs and rng.random() < preset["cover_rate"]:
+                pair = honest_pair(ctx, s)
+                if pair:
+                    a, b = _pick_close_pair(rng, pairs)
+                    plan[a], plan[b] = pair
+    else:
+        i = claim_turn(label)
+        plan[i] = lie_items[0]
+        lie_idx = [i]
+        for s in SPEAKERS:
+            if s != label and rng.random() < preset["cover_rate"]:
+                item = cover_line(ctx, s, lie_type)
+                if item:
+                    plan[claim_turn(s)] = item
+        # Optional honest anchor+anaphor pair for any speaker (liar included).
+        if rng.random() < preset["honest_pair_rate"]:
+            candidates = [(s, a, b) for s in SPEAKERS for a, b in zip(free(s), free(s)[1:])]
+            if candidates:
+                weights = [1 / (b - a) for _, a, b in candidates]
+                s, a, b = rng.choices(candidates, weights=weights)[0]
+                pair = honest_pair(ctx, s)
+                if pair:
+                    plan[a], plan[b] = pair
+
+    # Remaining honest turns. Retry a few times to avoid identical lines and a speaker
+    # repeating a fact they already stated.
     used_clauses = {item[1] for item in plan.values()}
     said: dict[str, set] = {sp: set() for sp in SPEAKERS}
     for i, item in plan.items():
@@ -364,8 +431,8 @@ def generate_example(
     for i, s in enumerate(seq):
         if i in plan:
             continue
-        for _ in range(chat["max_retries"]):
-            kind = rng.choices(list(kinds), weights=list(kinds.values()))[0]
+        for attempt in range(chat["max_retries"]):
+            kind = drawn[i] if attempt == 0 else rng.choices(list(kinds), weights=list(kinds.values()))[0]
             item = honest_message(ctx, s, kind)
             facts = {(c.ent, c.attr) for c in item[2]}
             if item[1] not in used_clauses and not (facts & said[s]):

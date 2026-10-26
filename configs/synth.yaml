@@ -31,9 +31,7 @@ synth:
     weather_weights: [0.5, 0.35, 0.15]
 
   lies:
-    time_shift_hours: [1, 5]
-    time_change_minutes_rate: 0.3
-    time_bounds_hours: [6, 23]
+    time_shift_hours: [1, 5]    # wrong times stay inside the true-value hour range
     min_count_change: 3
     min_count_change_frac: 0.2
 
@@ -59,6 +57,9 @@ synth:
       filler_rate: 0.05
       honest_pair_rate: 0.1
       same_attr_rate: 0.5
+      cover_rate: 0.8
+      cover_same_fact_rate: 0.3
+      cover_evidence_rate: 0.7
       kinds: {restate_ev: 3, restate_world: 1, neg_true: 0.3, implicit_true: 0.3,
               same_entity: 0.5, question: 2, small_talk: 3, personal: 1}
     med:
@@ -70,6 +71,9 @@ synth:
       filler_rate: 0.1
       honest_pair_rate: 0.3
       same_attr_rate: 0.5
+      cover_rate: 1.0
+      cover_same_fact_rate: 0.3
+      cover_evidence_rate: 0.7
       kinds: {restate_ev: 3, restate_world: 1.5, neg_true: 0.8, implicit_true: 0.8,
               same_entity: 1.5, question: 1.5, small_talk: 2, personal: 1}
     hard:
@@ -81,6 +85,9 @@ synth:
       filler_rate: 0.15
       honest_pair_rate: 0.6
       same_attr_rate: 0.6
+      cover_rate: 1.0
+      cover_same_fact_rate: 0.3
+      cover_evidence_rate: 0.7
       kinds: {restate_ev: 3, restate_world: 2, neg_true: 1.5, implicit_true: 1.2,
               same_entity: 2.5, question: 1.5, small_talk: 1.5, personal: 1}
 
