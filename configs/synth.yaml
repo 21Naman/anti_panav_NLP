@@ -1,0 +1,90 @@
+# Synthetic data generator settings (`liars synth --config configs/synth.yaml`).
+# CLI flags --n --seed --difficulty --pack override the matching keys here;
+# anything else can be changed with --set synth.<key>=<value>.
+
+seed: 1
+
+synth:
+  pack: default
+  speaker_names: letters        # letters | first_names (first_names fills meta.name_map)
+  liar_position: uniform        # uniform | {A: 0.4, B: 0.2, C: 0.2, D: 0.2}
+  mixed_weights: {easy: 0.2, med: 0.4, hard: 0.4}
+  debug_meta: false             # true adds meta.debug (lie target, message kinds)
+  n_samples: 20                 # readable examples written to data/samples/
+  samples_dir: data/samples
+  max_world_tries: 20
+
+  world:
+    n_entities: [4, 8]
+    min_types: {event: 1, object: 1, place: 1}
+    type_weights: {event: 0.4, object: 0.25, place: 0.2, person: 0.15}
+    n_people: [4, 6]            # names used as owners / organisers / companions
+    n_location_values: 6        # place names used as location values
+    personal_event_rate: 0.15   # share of events named like "Sam's birthday party"
+    p_cancelled: 0.2
+    event_hours: [9, 22]
+    open_hours: [6, 11]
+    minutes: [0, 0, 0, 15, 30, 30, 45]   # repeated entries = more likely
+    prices: [5, 8, 10, 12, 15, 18, 20, 25, 30, 35, 40, 45, 50, 60, 75, 80, 100, 120, 150]
+    counts: [3, 80]
+    weather: [sunny, rainy, snowy]
+    weather_weights: [0.5, 0.35, 0.15]
+
+  lies:
+    time_shift_hours: [1, 5]
+    time_change_minutes_rate: 0.3
+    time_bounds_hours: [6, 23]
+    min_count_change: 3
+    min_count_change_frac: 0.2
+
+  chat:
+    min_msgs_per_speaker: 2     # every speaker talks at least twice, liar or not
+    activity_floor: 0.3         # higher = speakers talk more evenly
+    personal_entity_rate: 0.5
+    max_retries: 6              # re-draws to avoid duplicate lines / repeated facts
+
+  # Message kind weights for honest turns. Hard negatives:
+  #   same_entity  - honest line about the lied-about entity (often the same fact, correct)
+  #   neg_true     - true "X is not V" statement
+  #   implicit_true- true implied fact (weather, happened)
+  #   restate_world- true but NOT in the evidence (unverifiable is not a lie)
+  #   honest_pair_rate - chance of an honest two-message anchor + "it ..." pair
+  difficulty:
+    easy:
+      facts: [3, 4]
+      messages: [8, 12]
+      lie_type_weights: {number_change: 1, time_shift: 1, day_change: 1, location_swap: 1,
+                         owner_swap: 1, negation: 1, implicit: 0.3, two_step: 0.3}
+      hedge_rate: 0.08
+      filler_rate: 0.05
+      honest_pair_rate: 0.1
+      same_attr_rate: 0.5
+      kinds: {restate_ev: 3, restate_world: 1, neg_true: 0.3, implicit_true: 0.3,
+              same_entity: 0.5, question: 2, small_talk: 3, personal: 1}
+    med:
+      facts: [4, 6]
+      messages: [10, 18]
+      lie_type_weights: {number_change: 1, time_shift: 1, day_change: 1, location_swap: 1,
+                         owner_swap: 1, negation: 1, implicit: 0.8, two_step: 0.8}
+      hedge_rate: 0.15
+      filler_rate: 0.1
+      honest_pair_rate: 0.3
+      same_attr_rate: 0.5
+      kinds: {restate_ev: 3, restate_world: 1.5, neg_true: 0.8, implicit_true: 0.8,
+              same_entity: 1.5, question: 1.5, small_talk: 2, personal: 1}
+    hard:
+      facts: [5, 8]
+      messages: [14, 24]
+      lie_type_weights: {number_change: 1, time_shift: 1, day_change: 1, location_swap: 1,
+                         owner_swap: 1, negation: 1, implicit: 1.5, two_step: 1.5}
+      hedge_rate: 0.2
+      filler_rate: 0.15
+      honest_pair_rate: 0.6
+      same_attr_rate: 0.6
+      kinds: {restate_ev: 3, restate_world: 2, neg_true: 1.5, implicit_true: 1.2,
+              same_entity: 2.5, question: 1.5, small_talk: 1.5, personal: 1}
+
+verify:
+  balance_tol: 0.02             # max |share - expected| per label ...
+  balance_min_n: 1000           # ... checked only when n >= this
+  max_dup_rate: 0.01

@@ -1,0 +1,218 @@
+# Casual-texting pack: short replies, lowercase, slang, some emojis.
+# Format documented at the top of default.yaml. Smaller than default on purpose.
+
+name: alt
+
+style:
+  lowercase_rate: 0.85
+  drop_period_rate: 0.75
+  exclaim_rate: 0.1
+  emoji_rate: 0.15
+  emojis: ["😂", "🙌", "👍", "😅", "🔥", "🙏", "😭", "👀", "🤷"]
+  slang_rate: 0.5
+  slang:
+    you: u
+    are: r
+    people: ppl
+    because: bc
+    really: rly
+    though: tho
+    tonight: tn
+    tomorrow: tmrw
+    probably: prob
+    okay: ok
+    I think: i think
+    honestly: tbh
+
+values:
+  days: [[Monday, Mon, monday], [Tuesday, Tue, tues], [Wednesday, Wed, weds],
+         [Thursday, Thu, thurs], [Friday, Fri, friday], [Saturday, Sat, sat],
+         [Sunday, Sun, sunday]]
+  time_on_hour: ["{h12}{ampm}", "{h12} {ampm}", "{hh24}:00"]
+  time_with_minutes: ["{h12}:{mm}{ampm}", "{h12}:{mm}", "{hh24}:{mm}"]
+  price: ["${n}", "{n} bucks", "{n} dollars"]
+  number_words: [zero, one, two, three, four, five, six, seven, eight, nine, ten]
+  count_word_rate: 0.15
+  weather:
+    sunny: [sunny, boiling, roasting]
+    rainy: [rainy, pouring, chucking it down]
+    snowy: [snowing, snowy]
+
+vocab:
+  speaker_names: [Jess, Ahmed, Bella, Carlos, Dani, Ethan, Fatima, Gabe, Holly, Isaac,
+                  Jade, Kofi, Lily, Mo, Nina, Oscar, Pia, Quinn, Riya, Seb]
+  people: [Alfie, Becca, Charlie, Dom, Evie, Finn, Georgia, Harry, Izzy, Josh,
+           Kat, Liam, Megan, Nate, Olive, Pete, Ruby, Sid, Tilly, Will]
+  places: [the bowling place, Luigi's, the rec centre, the skate park, Costa,
+           the student union, the leisure centre, the canal, the high street,
+           Jake's flat, the uni library, the food court, the old cinema, the climbing wall,
+           the pier, the corner shop]
+  events: [the bbq, trivia night, the gig, five-a-side, the pub quiz, the house party,
+           movie night, the escape room, laser tag, the open day, the car boot sale,
+           the comedy show, the pottery class, the sleepover, the camping trip]
+  events_personal: ["{p}'s bday", "{p}'s party", "{p}'s leaving do"]
+  objects: [bike, hoodie, speaker, charger, switch, longboard, mug, headset, tent]
+  object_phrase: "the {colour} {object}"
+  colours: [red, blue, black, white, green, pink, grey]
+
+evidence:
+  event.day:
+    - "{e} is on {v}."
+    - "{e} happened on {v}."
+    - "Day of {e}: {v}."
+  event.time:
+    - "{e} starts at {v}."
+    - "{e} began at {v}."
+    - "Start time of {e}: {v}."
+  event.location:
+    - "{e} is at {v}."
+    - "{e} was held at {v}."
+    - "Location of {e}: {v}."
+  event.price:
+    - "{e} costs {v} per person."
+    - "Tickets for {e} were {v}."
+    - "Price of {e}: {v}."
+  event.count:
+    - "{v} people went to {e}."
+    - "Attendance at {e}: {v}."
+    - "{e} had {v} people."
+  event.weather:
+    - "It was {v} during {e}."
+    - "Weather at {e}: {v}."
+    - "{e} was {v}."
+  event.happened:
+    "true": ["{e} went ahead.", "{e} did happen.", "{e} was not called off."]
+    "false": ["{e} got cancelled.", "{e} was called off.", "{e} never happened."]
+  event.owner:
+    - "{v} organised {e}."
+    - "Organiser of {e}: {v}."
+    - "{e} was set up by {v}."
+  object.owner:
+    - "{e} is {v}'s."
+    - "Owner of {e}: {v}."
+    - "{e} belongs to {v}."
+  object.location:
+    - "{e} is at {v}."
+    - "{e} got left at {v}."
+    - "Last seen location of {e}: {v}."
+  object.price:
+    - "{e} cost {v}."
+    - "Price of {e}: {v}."
+    - "{e} was bought for {v}."
+  place.time:
+    - "{e} opens at {v}."
+    - "Opening time of {e}: {v}."
+    - "{e} doesn't open until {v}."
+  place.day:
+    - "{e} is shut on {v}."
+    - "Closed day for {e}: {v}."
+    - "{e} is closed every {v}."
+  place.price:
+    - "Entry to {e} is {v}."
+    - "{e} charges {v} to get in."
+    - "Entry fee for {e}: {v}."
+  person.location:
+    - "{e} was at {v} in the afternoon."
+    - "{e} spent the afternoon at {v}."
+    - "Afternoon location of {e}: {v}."
+  person.companion:
+    - "{e} was with {v} all afternoon."
+    - "{e} hung out with {v}."
+    - "{e} spent the afternoon with {v}."
+
+claims:
+  event.day:
+    pos: ["{e}'s on {v}", "{e} was {v}", "{e} is {v}", "it's {v} for {e}"]
+    neg: ["{e} isn't {v}", "{e} wasn't on {v}"]
+  event.time:
+    pos: ["{e} starts {v}", "{e} started at {v}", "{e} kicks off {v}", "{e} is at {v}"]
+    neg: ["{e} doesn't start at {v}", "{e} didn't start {v}"]
+  event.location:
+    pos: ["{e}'s at {v}", "{e} was at {v}", "{e} is at {v}", "they did {e} at {v}"]
+    neg: ["{e} isn't at {v}", "{e} wasn't at {v}"]
+  event.price:
+    pos: ["{e} is {v}", "{e} was {v}", "tickets for {e} were {v}", "{e} costs {v}"]
+    neg: ["{e} isn't {v}", "{e} wasn't {v}"]
+  event.count:
+    pos: ["{v} people came to {e}", "{e} had {v} people", "{v} ppl showed up to {e}"]
+  event.weather:
+    pos: ["it was {v} at {e}", "{e} was {v}", "weather at {e} was {v}"]
+    neg: ["it wasn't {v} at {e}", "{e} wasn't {v}"]
+  event.happened:
+    "true": ["{e} went ahead", "{e} did happen", "they didn't cancel {e}", "{e} happened"]
+    "false": ["{e} got cancelled", "{e} was called off", "{e} didn't happen", "no {e} in the end"]
+  event.owner:
+    pos: ["{v} organised {e}", "{e} was {v}'s thing", "{v} set up {e}"]
+    neg: ["{v} didn't organise {e}", "{e} wasn't {v}'s thing"]
+  object.owner:
+    pos: ["{e} is {v}'s", "{e} is defo {v}'s", "{e} belongs to {v}", "{v} owns {e}"]
+    neg: ["{e} isn't {v}'s", "{v} doesn't own {e}"]
+  object.location:
+    pos: ["{e}'s at {v}", "{e} got left at {v}", "{e} is at {v}", "saw {e} at {v}"]
+    neg: ["{e} isn't at {v}", "{e} wasn't at {v}"]
+  object.price:
+    pos: ["{e} was {v}", "{e} cost {v}", "{e} went for {v}"]
+    neg: ["{e} wasn't {v}", "{e} didn't cost {v}"]
+  place.time:
+    pos: ["{e} opens at {v}", "{e} opens {v}", "{e} doesn't open till {v}"]
+    neg: ["{e} doesn't open at {v}"]
+  place.day:
+    pos: ["{e}'s shut on {v}", "{e} is closed {v}", "{e} is shut on {v}"]
+    neg: ["{e} is open on {v}", "{e} isn't shut {v}"]
+  place.price:
+    pos: ["{e} is {v} to get in", "entry at {e} is {v}", "{e} charges {v}"]
+    neg: ["{e} isn't {v} to get in", "{e} doesn't charge {v}"]
+  person.location:
+    pos: ["{e} was at {v}", "{e} was at {v} all afternoon", "saw {e} at {v}"]
+    neg: ["{e} wasn't at {v}", "{e} didn't go to {v}"]
+  person.companion:
+    pos: ["{e} was with {v}", "{e} and {v} were together", "{e} was out with {v}"]
+    neg: ["{e} wasn't with {v}", "{e} didn't see {v}"]
+
+implicit:
+  event.weather:
+    sunny: ["got so sunburnt at {e}", "needed sunnies all day at {e}"]
+    rainy: ["got absolutely soaked at {e}", "my shoes are still wet from {e}"]
+    snowy: ["snowball fight after {e} was class", "nearly slipped on the snow at {e}"]
+  event.happened:
+    "true": ["{e} was so good", "had the best time at {e}", "{e} was rammed"]
+    "false": ["still waiting for {e} to be rescheduled", "got my refund for {e}"]
+
+anchors:
+  event: ["finally went to {e}", "was at {e} too", "ok so {e}"]
+  object: ["saw {e} earlier", "re {e}"]
+  place: ["popped into {e} yday", "walked past {e} earlier"]
+
+anaphors:
+  event.day: ["it was {v}", "that was on {v}"]
+  event.time: ["it started {v}", "kicked off at {v}"]
+  event.location: ["it was at {v}", "they did it at {v}"]
+  event.price: ["it was {v}", "tickets were {v}"]
+  event.count: ["{v} ppl showed up", "like {v} people there"]
+  event.owner: ["{v} organised it", "it was {v}'s thing"]
+  object.owner: ["it's {v}'s", "belongs to {v}"]
+  object.location: ["it's at {v}", "got left at {v}"]
+  object.price: ["it was {v}", "cost {v}"]
+  place.time: ["opens at {v}", "they open {v}"]
+  place.day: ["it's shut on {v}", "they're closed {v}"]
+  place.price: ["it's {v} to get in", "entry was {v}"]
+
+questions:
+  event: ["when's {e}?", "what time is {e}?", "who's going to {e}?", "where's {e}?",
+          "how was {e}?"]
+  object: ["whose is {e}?", "where's {e}?", "how much was {e}?"]
+  place: ["anyone been to {e}?", "when does {e} open?"]
+  person: ["anyone heard from {e}?", "where was {e}?"]
+
+small_talk: ["lol", "haha", "nice", "same", "omg", "ok", "fair", "yesss", "wait what",
+             "no way", "class", "love it", "true", "bet", "sounds good"]
+
+personal: ["so tired today", "need food", "my phone's on 2%", "running late sorry",
+           "can't be bothered tbh", "who's driving?", "i'll bring snacks"]
+
+personal_entity: ["my mate loves {e}", "might bring my flatmate to {e}",
+                  "{e} reminds me of last year"]
+
+hedges: ["i think {c}", "pretty sure {c}", "{c} i think", "{c} right?", "{c} no?"]
+
+fillers: ["ngl ", "btw ", "ok ", "wait ", "fyi "]

@@ -5,9 +5,9 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 1 — not started
-- Last completed phase: 0 (scaffold) — done
-- Next step: start Phase 1 (synthetic generator + benchmark sets)
+- Current phase: 2 — not started
+- Last completed phase: 1 (synthetic generator + bench sets) — done (sample read-through pending user)
+- Next step: start Phase 2 (CV, trainer, baselines, leak check, submit, score)
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -51,7 +51,8 @@
 - Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
 - LLM benchmark winner: (model id — zero-shot acc — chats/min on T4)
 - QLoRA time per epoch on T4: (model id — examples — max_len — hours)
-- Template packs available: (names)
+- Template packs available: default (neutral sentences), alt (casual texting) — src/liars/synth/templates/
+- Benchmark sets: data/bench/{stage1 (15k default mixed, seed 101), train (2k alt med+hard, seed 202, first_names), test (1k alt, seed 303, labels hidden) + test_labels.csv}. Regenerate: README Phase 1.
 
 ## Organizer answers (2026-10-26, from the SPOC)
 - Dataset size: still being finalised. -> Plan for both small (<5k) and large train sets.
@@ -161,3 +162,63 @@ Claude appends one entry per phase using this template:
   liar who never speaks) before any model sees it. The fixture is a tiny, balanced, fully
   known dataset that every test runs on in seconds.
 - Commit: (see git log, "phase 0: ...")
+
+### Phase 1 — Synthetic generator + benchmark sets
+- Status: done (one Done-when item pending the user: reading the sample files)
+- Date: 2026-10-27
+- Built:
+  - `synth/world.py` -> seeded World of 4–8 entities (event/object/place/person). Cancelled
+    events keep only `happened` + `owner`. Weather is per day (events on one day agree).
+    Owner/companion/location values come from name pools that are never entities, so
+    facts about different entities cannot clash. `alternative_value` makes wrong values.
+  - `synth/pack.py` -> load + `check_pack` (renders every template with dummy values) + value
+    rendering (days, 12/24 h times, prices, number words) + style (casing, slang, emoji).
+  - `synth/programmatic.py` -> chat assembly. Speaker order is drawn before the liar is
+    known; every speaker talks >= 2 times. Lies use the SAME templates as honest claims.
+    Honest kinds: restate evidence, unverifiable world fact, true "not" statement, true
+    implicit, same-entity hard negative, question, small talk, personal, honest
+    anchor+"it" pair. Retries avoid duplicate lines and a speaker repeating a fact.
+  - `synth/verify.py` -> per chat: schema, evidence = world, only lie lines are false,
+    lie spoken by label, false claim's fact is in the evidence, lie type matches the
+    change, two_step 2nd line does not name the entity; per set: label balance, dup rate.
+  - `adapters/synthetic.py` -> JSONL writer, `--hide-labels` (label=null; lie_type,
+    lie_msg_idx, difficulty moved to the CSV), readable samples with "<-- LIE" marks.
+  - CLI `liars synth` (prints verify + stats + validate, writes samples, exit 1 on errors).
+- Files: src/liars/synth/{__init__,pack,world,programmatic,verify}.py, templates/{default,alt}.yaml,
+  src/liars/adapters/{__init__,synthetic}.py, configs/synth.yaml, tests/test_synth.py;
+  cli.py (synth), pyproject (package-data for templates).
+- Commands: see README Phase 1 (bench commands are exact).
+- Results:
+  | check | result |
+  |---|---|
+  | 5000 med default | 1.8 s wall (generation 1.0 s) |
+  | verify, 2000 each of easy/med/hard x default/alt | 0 errors, 0 duplicates |
+  | uniform labels | exact 25% each (largest-remainder allocation) |
+  | skew {A:.4,B:.2,C:.2,D:.2}, n=5000 | 2000/1000/1000/1000 |
+  | bench stage1 / train / test | 15000 / 2000 / 1000, validate 0 errors |
+  | bench train lengths | total chars p50 641, p99 986; msgs 10–24 |
+  | quick leak look (bench train) | liar msgs 4.17 vs 4.11; liar first 25.5%; first-appearance rank flat; liar line 28.7 vs 27.3 chars |
+- Done-when checks: speed pass; verify 0 errors all difficulties/packs pass; balance ±2% and
+  skew pass; 4 bench files + validate pass; user read samples **PENDING USER**
+  (files: data/samples/synth_default_med.txt, synth_alt_hard.txt, synth_alt_med+hard.txt,
+  synth_default_mixed.txt); pytest 70 passed (0.6 s) pass.
+- Decisions & deviations:
+  - Labels allocated exactly (largest remainder, shuffled) instead of sampled: balance is exact.
+  - `--difficulty` also accepts comma lists (`med,hard` = equal mix); used for bench train/test.
+  - Neg templates omitted for counts ("there weren't 30 people" is ambiguous).
+  - Added `synth/pack.py` (not in layout). Object phrase lives in the pack (`vocab.object_phrase`).
+  - Hidden test JSONL drops lie_type / lie_msg_idx / difficulty from meta (lie_msg_idx would
+    reveal the liar); they are in test_labels.csv for per-type scoring.
+- Known issues / TODO: tense mixes ("is"/"was") within a chat; anchor "it" lines can be
+  ambiguous when other entities are discussed in between (mitigated: closer turns preferred);
+  liar lines are ~1.4 chars longer on average (lie is always a claim) — Phase 2 leak check
+  will quantify. `configs/` is not installed with the package (Phase 4: notebooks must cd
+  into a repo checkout or pass --config).
+- Explain-it-to-me: we first invent a small hidden world (who owns what, when things
+  happen) and only then write the chat from it, so we always know which line is false.
+  The evidence is a sample of true world facts; the liar states one wrong value for a fact
+  that is in the evidence. Hard negatives (honest people mentioning the same thing,
+  hedging, saying true "not" statements, or saying true things the evidence doesn't
+  cover) stop a model from winning with shortcuts like "whoever mentions the evidence
+  entity" or "whoever says not".
+- Commit: (see git log, "phase 1: ...")

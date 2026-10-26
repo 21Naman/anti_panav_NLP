@@ -36,5 +36,8 @@ liars = "liars.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"liars.synth" = ["templates/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
