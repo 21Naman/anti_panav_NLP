@@ -36,8 +36,13 @@ _Loader.add_implicit_resolver(
 
 
 def parse_value(text: str) -> Any:
-    """Parse an override value the same way YAML would (ints, floats, bools, lists...)."""
-    return yaml.load(text, Loader=_Loader)
+    """Parse an override value the same way YAML would (ints, floats, bools, lists...).
+    Mappings and lists only when written as {...} / [...]: plain YAML would turn
+    `Answer:` into {"Answer": None}."""
+    value = yaml.load(text, Loader=_Loader)
+    if isinstance(value, (dict, list)) and not text.strip().startswith(("{", "[")):
+        return text
+    return value
 
 
 def apply_overrides(cfg: dict, overrides: Iterable[str] | None) -> dict:

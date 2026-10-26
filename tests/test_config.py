@@ -19,7 +19,8 @@ def test_load_and_override(tmp_path):
 @pytest.mark.parametrize(
     "text, value",
     [("3", 3), ("0.5", 0.5), ("1e-5", 1e-5), ("true", True), ("null", None),
-     ("[1, 2]", [1, 2]), ("hello", "hello"), ("a=b", "a=b")],
+     ("[1, 2]", [1, 2]), ("hello", "hello"), ("a=b", "a=b"), ("Answer:", "Answer:"),
+     ("- x", "- x"), ("{A: 0.4}", {"A": 0.4})],
 )
 def test_parse_value(text, value):
     assert parse_value(text) == value
