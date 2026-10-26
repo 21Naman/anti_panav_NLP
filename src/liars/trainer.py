@@ -113,9 +113,6 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         va = [ex for ex in train if folds[ex.id] == f]
         tf = time.time()
         model = _fit(cfg, tr)
-        if hasattr(model, "report"):  # optional model-specific fit report
-            paths.reports.mkdir(parents=True, exist_ok=True)
-            (paths.reports / f"{run}_fold{f}.md").write_text(model.report(), encoding="utf-8")
         p = model.predict_proba(va)
         fold_acc[f] = accuracy(p, _labels(va))
         p.insert(1, "fold", f)
@@ -123,6 +120,9 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         oof_parts.append(p)
         if test:
             test_parts.append(model.predict_proba(test))
+        if hasattr(model, "report"):  # optional model-specific report (fit + predict stats)
+            paths.reports.mkdir(parents=True, exist_ok=True)
+            (paths.reports / f"{run}_fold{f}.md").write_text(model.report(), encoding="utf-8")
         log(f"  fold {f}: train {len(tr)} held-out {len(va)} acc {fold_acc[f]:.4f} "
             f"({time.time() - tf:.1f}s)")
 

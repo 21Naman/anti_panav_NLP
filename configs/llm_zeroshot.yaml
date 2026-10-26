@@ -1,0 +1,68 @@
+# Zero-shot open LLM: softmax over the A/B/C/D letter logits at the answer position.
+#   liars train --config configs/llm_zeroshot.yaml --test data/bench/test.jsonl        (Kaggle T4)
+#   liars train --config configs/llm_zeroshot.yaml --debug                             (CPU, 0.5B)
+# Other models: --set llm.model_id=Qwen/Qwen3-14B  (hub id or local path)
+seed: 42
+
+data:
+  train: data/bench/train.jsonl
+  test: data/bench/test.jsonl
+  folds: null
+
+cv:
+  k: 5
+  seed: 42
+  holdout_fold: 0
+
+train:
+  mode: holdout          # expensive model: predict the holdout fold + test only
+  refit_full: false      # nothing is trained; refit would only change the calibration
+  inner_val_frac: 0.05
+
+model:
+  name: llm_zeroshot
+
+llm:
+  model_id: Qwen/Qwen3-8B
+  load_in_4bit: true     # NF4 + fp16 compute on CUDA; ignored on CPU
+  double_quant: true
+  device: auto           # cuda if available, else cpu (never mps)
+  batch_size: 8
+  max_len: 2048          # prompt tokens; longer chats are truncated (see prompt.py)
+  chat_template_kwargs:
+    enable_thinking: false   # Qwen3-style templates: answer directly, no <think> block
+  calib_n: 100           # training-fold examples used to pick the temperature (0 = T 1.0)
+  temperatures: [0.25, 0.5, 1.0, 2.0, 4.0]
+  fewshot_n: 0           # few-shot examples from the training folds (0 = off)
+  progress: false
+
+prompt:
+  system: null
+  intro: "Read the verified evidence and the group chat between speakers A, B, C and D. Exactly one speaker makes a statement that contradicts the evidence."
+  evidence_header: "Evidence:"
+  fact_format: "{i}. {fact}"
+  chat_header: "Chat:"
+  line_format: "{speaker}: {text}"
+  question: "Which speaker (A, B, C or D) makes a statement that contradicts the evidence? Answer with one letter."
+  answer_prefix: ""
+
+augment:
+  tta_n: 4               # speaker permutations averaged at inference (1 = off)
+  permute_train: true    # used by trained models (Phase 6/7)
+  shuffle_evidence: false
+
+paths:
+  data_dir: data
+
+debug:
+  data:
+    train: tests/fixtures/tiny.jsonl
+    test: tests/fixtures/tiny.jsonl
+  llm:
+    model_id: Qwen/Qwen2.5-0.5B-Instruct
+    load_in_4bit: false
+    device: cpu
+    batch_size: 4
+    calib_n: 8
+  augment:
+    tta_n: 2

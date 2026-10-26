@@ -10,6 +10,7 @@ REGISTRY: dict[str, str] = {
     "majority": "liars.models.baselines:MajorityModel",
     "tfidf_lr": "liars.models.baselines:TfidfLRModel",
     "nli_zeroshot": "liars.models.nli_zeroshot:NLIZeroShotModel",
+    "llm_zeroshot": "liars.models.llm_zeroshot:LLMZeroShotModel",
 }
 
 
