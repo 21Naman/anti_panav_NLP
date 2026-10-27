@@ -5,10 +5,10 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 7 — code + debug done (wip commit 6798b28); GPU run next
-- Last completed phase: 6 (QLoRA gemma-4-12B-it) — done
-- Next step: Phase 7 real run (DeBERTa 5-fold on bench train, Kaggle), then Phase 8 ensemble,
-  Phase 10 entry. Phase 8 and 10 code is already committed as wip (29352e0, c00f4cf).
+- Current phase: 8 — ensemble/report/rules done on bench; entry being written
+- Last completed phase: 7 (DeBERTa-large 5-fold) — done
+- Next step: Phase 8 entry, then Phase 10 (pseudo-label holdout measurement running on Kaggle:
+  kernel liars-deberta-pseudo). Then STOP: Phase 9 needs the user (separate timed session).
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -49,10 +49,11 @@
 - Hugging Face: NO gated-model licences accepted. Phase 5: prefer non-gated models. If
   a gated model looks clearly better, tell the user which model page to open and
   accept, and wait.
-- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~4.4 h (week of 2026-10-26)
-- GPU hours used in prep (account panavrg): 4.4 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h; Phase 6 QLoRA 2.58 h)
+- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~6.8 h (week of 2026-10-26)
+- GPU hours used in prep (account panavrg): 6.8 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h; Phase 6 QLoRA 2.58 h; Phase 7 DeBERTa 2.32 h + 2 failed starts ~0.1 h)
 - Best result so far: llm_qlora_1027-002454 (Kaggle) — holdout — 97.5% fold 0 / 96.8% bench test — gemma-4-12B-it QLoRA r16, 2 epochs, best step 138/190, TTA 2, T=0.25. (Zero-shot gemma: 84.5% / 84.3%; NLI-large: 71.2% OOF / 73.4% test)
-- Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
+- Stage-1 / pretrained checkpoints: none yet (stage 1 deferred for QLoRA and DeBERTa).
+- DeBERTa time on T4: DeBERTa-v3-large MC, 1520 chats, ~225 tokens/choice p50 (max_len 512), grad checkpointing, micro 2 x accum 8: 10.4 min/epoch; one fold (2 epochs + evals + TTA-2 predict of 400 + 1000 chats) = 28 min; 5-fold = 2.32 h; 9.8 GiB peak.
 - LLM benchmark winner: google/gemma-4-12B-it (Apache-2.0, not gated) — 82.4% zero-shot on 500 bench chats (no TTA) — 110 chats/min on T4 4-bit (66/min with TTA 2), 10.0 GiB. Fallback: Qwen/Qwen3-14B 69.4% (needs prompt.answer_prefix="Answer:")
 - QLoRA time per epoch on T4: google/gemma-4-12B-it — 1520 chats (prompt p50 318 / max 489 tokens) — max_len 1024 — 0.96 h/epoch (36.3 s/step, 16 chats/step). Rule of thumb: ~1600 chats/h at these lengths; time grows ~linearly with prompt length. Whole run (2 epochs + 9 evals + calib + TTA-2 predict of 1400 chats) = 2.58 h. Predict = 51 chats/min with TTA 2. 8.6 GiB peak.
 - Template packs available: default (neutral sentences), alt (casual texting) — src/liars/synth/templates/
@@ -97,6 +98,8 @@ Answers (date — answer):
 | 2026-10-27 | setup | Commit locally only until Phase 4; push to origin from Phase 4 on | Kaggle installs from GitHub starting in Phase 4 |
 | 2026-10-27 | 6 | QLoRA gemma-4-12B-it is the main model (97.5% holdout vs 84.5% zero-shot) | +13 points from 1520 training chats |
 | 2026-10-27 | 6 | Stage-1 QLoRA experiment deferred until after the Phase 7 DeBERTa run, and only if the weekly quota allows | Solo quota; bench holdout is already ~saturated (97.5%), so stage 1 can hardly show a gain here |
+| 2026-10-27 | 7 | DeBERTa real run = large, 5-fold, 2 epochs; stage-1 variant not run | Solo GPU quota (stage 1 on 15k chats ~ +2 h); bench run already gives timing + ensemble partner |
+| 2026-10-27 | 7 | DeBERTa loads fp32 master weights and uses gradient checkpointing by default | transformers 5 kept the fp16 checkpoint dtype (GradScaler crash); large OOMed on T4 at micro batch 2 |
 
 ## Phase log
 Claude appends one entry per phase using this template:
@@ -498,3 +501,46 @@ Claude appends one entry per phase using this template:
   or temperature, so its accuracy is an honest estimate of unseen data; the ensemble
   later fits weights on it, which only works if nothing else has touched it.
 - Commit: (see git log, "phase 6: ...")
+
+### Phase 7 — DeBERTa focus-marked multiple choice
+- Status: done (stage-1 variant not run, see decisions)
+- Date: 2026-10-27
+- Built: `models/deberta_mc.py` -> AutoModelForMultipleChoice from the Phase 3 NLI DeBERTa;
+  4 choices per chat (text_a = "Evidence: " + facts, text_b = chat with the candidate's lines
+  in `<t> ... </t>` + question); `keep_for_choice` truncation never drops the marked
+  speaker's lines; fp32 master weights + fp16 autocast + GradScaler, gradient checkpointing,
+  cosine + warmup, optional layer-wise LR decay, early stopping on an inner split, TTA,
+  temperature fit; time probe aborts above `deberta.max_gpu_hours` (4) counting ALL folds
+  left (trainer passes `train._fits_left`); report has peak GPU memory. `--stage 1|2` via
+  `stages:` in the config; `init_from_run: latest:<prefix>`.
+- Files: src/liars/models/deberta_mc.py, configs/deberta_mc.yaml, tests/test_deberta.py
+  (marked-lines tests, latest: resolution, time guard, fp16-checkpoint-loads-as-fp32),
+  src/liars/trainer.py, src/liars/cli.py.
+- Commands: `liars train --config configs/deberta_mc.yaml --stage 1 --debug` then `--stage 2 --debug`;
+  Kaggle: `python scripts/kaggle_run.py push --name deberta-large-5f --code dataset --cmd
+  "liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl --set deberta.epochs=2"`.
+- Results (run deberta_mc_1027-032050, DeBERTa-v3-large, 5-fold, 2 epochs, TTA 2):
+  | model | OOF (2000) | fold 0 | test | impl | 2step | hard | med |
+  |---|---|---|---|---|---|---|---|
+  | NLI-large zero-shot (P3) | 0.712 | 0.715 | 0.734 | | | | |
+  | gemma-4-12B zero-shot (P5) | — | 0.845 | 0.843 | .62 | .62 | .78 | .91 |
+  | DeBERTa-large MC (P7) | **0.937** | 0.928 | **0.958** | .97 | .75 | .94 | .97 |
+  | gemma-4-12B QLoRA (P6) | — | **0.975** | **0.968** | .96 | .86 | .96 | .98 |
+  Folds .928/.938/.953/.948/.920. Per true label .93–.95 (no position bias). Val acc still
+  rising at the last eval (best step = last step in 4 of 5 folds) -> 3 epochs likely helps.
+  0 chats truncated (p99 343 tokens/choice). 2.32 GPU h, 9.8 GiB peak.
+- Done-when checks: debug stage 1 (19 s) then stage 2 (78 s) on CPU pass; marked-lines test
+  pass (test_keep_for_choice_never_drops_marked_lines, test_encoded_choices_keep_all_marked_lines);
+  bench results in the table above pass; pytest pass (129 passed, 35 s).
+- Decisions & deviations: large not base (timing known now for competition day); 2 epochs
+  to fit the solo quota; stage-1 variant skipped (GPU). Two failed starts fixed: (1) "Attempting
+  to unscale FP16 gradients" — transformers 5 loads the fp16-stored NLI checkpoint in fp16,
+  now `dtype=torch.float32`; (2) CUDA OOM at 14.5 GiB — gradient checkpointing switch, on.
+- Known issues / TODO: two_step is DeBERTa's weak spot (.75); it disagrees with QLoRA on 31/400
+  holdout chats (QLoRA right 24, DeBERTa 5) — useful but small ensemble gain (Phase 8).
+- Explain-it-to-me: each chat becomes 4 versions, one per speaker, with that speaker's lines
+  wrapped in marker tokens; the model gives each version one score and a softmax across the
+  4 picks the liar. Scoring speakers independently would let all four look "fine" or "bad"
+  at once; the shared softmax forces a comparison ("who is MOST contradicting?"), which
+  matches the task's exactly-one-liar structure and keeps the context of the other speakers.
+- Commit: (see git log, "phase 7: ...")

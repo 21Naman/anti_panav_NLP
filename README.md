@@ -219,6 +219,10 @@ liars folds --in data/bench/stage1.jsonl --k 20                    # 5% holdout 
 liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl   # 5-fold, GPU
 ```
 
+Bench result (Kaggle T4, DeBERTa-v3-large, 5-fold, 2 epochs, 2.3 GPU h): 93.7% OOF / 95.8%
+bench test. Large needs `deberta.gradient_checkpointing: true` on a T4 (OOM otherwise); ~10 min
+per epoch per 1500 chats.
+
 ## Phase 8 — Ensemble, error analysis, rules
 
 What it does:
