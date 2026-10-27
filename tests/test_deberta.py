@@ -97,3 +97,20 @@ def test_time_guard_stops_long_runs(tiny):
     m.log = lambda *a: None
     with pytest.raises(RuntimeError, match="max_gpu_hours"):
         m.fit(tiny[:8], None, cfg)
+
+
+def test_fp16_checkpoint_loads_as_fp32(tmp_path):
+    """The real NLI DeBERTa checkpoints are stored in fp16; training needs fp32 master weights."""
+    try:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        src = AutoModelForSequenceClassification.from_pretrained(XSMALL)
+        tok = AutoTokenizer.from_pretrained(XSMALL)
+    except Exception as e:
+        pytest.skip(f"model unavailable: {e}")
+    src.half().save_pretrained(tmp_path)
+    tok.save_pretrained(tmp_path)
+    m = DebertaMCModel()
+    m.dcfg = load_config(ROOT / "configs" / "deberta_mc.yaml", ["deberta.device=cpu"])["deberta"]
+    m._load(str(tmp_path), add_marks=True)
+    assert {p.dtype for p in m.model.parameters()} == {torch.float32}

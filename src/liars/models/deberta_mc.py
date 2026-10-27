@@ -70,7 +70,11 @@ class DebertaMCModel(Model):
         tok = AutoTokenizer.from_pretrained(source)
         if add_marks:
             tok.add_special_tokens({"additional_special_tokens": [d["mark_open"], d["mark_close"]]})
-        model = AutoModelForMultipleChoice.from_pretrained(source, ignore_mismatched_sizes=True)
+        # fp32 master weights: transformers 5 loads a checkpoint in its stored dtype (the NLI
+        # DeBERTa checkpoints are fp16), and GradScaler cannot unscale fp16 gradients.
+        # Autocast still runs the forward pass in fp16 on CUDA.
+        model = AutoModelForMultipleChoice.from_pretrained(source, ignore_mismatched_sizes=True,
+                                                           dtype=torch.float32)
         model.resize_token_embeddings(len(tok))
         self.device = get_device(d["device"])
         self.tok, self.model = tok, model.to(self.device)
