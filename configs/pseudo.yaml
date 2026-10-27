@@ -1,0 +1,9 @@
+# Pseudo-labelling. OFF until the organizers confirm it is allowed (PROGRESS.md -> Still open).
+#   liars pseudo --preds data/preds/ens_<name>.parquet --test <test.jsonl> --out data/canonical/pseudo.jsonl
+#   liars train --config configs/llm_qlora.yaml --set 'train.extra_train=[data/canonical/pseudo.jsonl]'
+seed: 42
+pseudo:
+  enabled: false
+  threshold: 0.95
+paths:
+  data_dir: data

@@ -69,14 +69,15 @@ def resolve_model_dir(paths, run_or_path: str) -> Path:
     raise FileNotFoundError(f"no saved model for {run_or_path!r} under {paths.models}")
 
 
-def _fit(cfg: dict, train: Sequence[Example]) -> Model:
+def _fit(cfg: dict, train: Sequence[Example], extra: Sequence[Example] = ()) -> Model:
+    """`extra` (e.g. pseudo-labels) joins the TRAINING side only, never the validation split."""
     seed_everything(cfg["seed"])
     model = get_model(cfg["model"]["name"])
     if model.uses_val and not cfg["train"].get("_refit"):
         tr, va = inner_split(train, cfg["train"]["inner_val_frac"], cfg["seed"])
     else:
         tr, va = list(train), None
-    model.fit(tr, va, cfg)
+    model.fit(list(tr) + list(extra), va, cfg)
     return model
 
 
@@ -117,6 +118,12 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
     test_path = test_path or cfg["data"].get("test")
     test = load_jsonl(test_path) if test_path else []
     folds = _resolve_folds(cfg, train, train_path, debug)
+    extra = [ex for f in (cfg["train"].get("extra_train") or []) for ex in load_jsonl(f)]
+    clash = {ex.id for ex in extra} & {ex.id for ex in train}
+    if clash:
+        raise ValueError(f"extra_train ids also in train (e.g. {sorted(clash)[:3]})")
+    if extra:
+        log(f"extra training examples (training side only): {len(extra)}")
     mode = cfg["train"]["mode"]
     stage_tag = f"_s{stage}" if stage is not None else ""
     run = f"{Path(config_path).stem}{stage_tag}_{datetime.now().strftime('%m%d-%H%M%S')}"
@@ -142,7 +149,7 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         tf = time.time()
         fold_cfg = copy.deepcopy(cfg)
         fold_cfg["train"]["_save_dir"] = str(paths.models / run / f"fold{f}")
-        model = _fit(fold_cfg, tr)
+        model = _fit(fold_cfg, tr, extra)
         p = model.predict_proba(va)
         fold_acc[f] = accuracy(p, _labels(va))
         p.insert(1, "fold", f)
@@ -161,7 +168,7 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         refit_cfg["train"]["_refit"] = model.refit_info()
         refit_cfg["train"]["_save_dir"] = str(paths.models / run / "full")
         log("  refit on 100% of train for test predictions")
-        test_parts = [_fit(refit_cfg, train).predict_proba(test)]
+        test_parts = [_fit(refit_cfg, train, extra).predict_proba(test)]
 
     oof = pd.concat(oof_parts, ignore_index=True)
     save_preds(oof, paths.oof / f"{run}.parquet")

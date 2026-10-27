@@ -37,5 +37,5 @@ def test_stats_fixture(tiny_path):
 
 
 def test_placeholder_exits_nonzero():
-    result = runner.invoke(app, ["pseudo", "--preds", "x"])
+    result = runner.invoke(app, ["adapt", "--in", "x"])
     assert result.exit_code == 2

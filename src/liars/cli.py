@@ -323,11 +323,42 @@ def rules_report_cmd(in_path: Path = InPath) -> None:
     typer.echo(f"report -> {path}")
 
 
+@app.command()
+def pseudo(
+    preds: Path = typer.Option(..., "--preds", exists=True, dir_okay=False),
+    test: Path = typer.Option(..., "--test", exists=True, dir_okay=False),
+    out: Path = typer.Option(..., "--out"),
+    threshold: float = typer.Option(None, "--threshold", help="Default: config pseudo.threshold."),
+    labels: Path = typer.Option(None, "--labels", help="Bench only: hidden labels to measure pseudo-label accuracy."),
+    config: Path = typer.Option(Path("configs/pseudo.yaml"), "--config"),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Pseudo-label confident test predictions (refuses unless pseudo.enabled is true)."""
+    from liars.preds import load_preds
+    from liars.pseudo import PseudoDisabled, select_pseudo
+    from liars.schema import save_jsonl
+    from liars.score import load_labels
+
+    cfg = load_config(config, set_)
+    th = threshold if threshold is not None else cfg["pseudo"]["threshold"]
+    test_ex = load_jsonl(test)
+    try:
+        chosen = select_pseudo(load_preds(preds), test_ex, th, cfg["pseudo"]["enabled"])
+    except PseudoDisabled as e:
+        typer.echo(f"REFUSED: {e}")
+        raise typer.Exit(code=1)
+    save_jsonl(chosen, out)
+    typer.echo(f"{len(chosen)} of {len(test_ex)} test chats have confidence >= {th} -> {out}")
+    if labels:
+        truth = dict(zip(*load_labels(labels)[["id", "label"]].T.values))
+        acc = sum(ex.label == truth.get(ex.id) for ex in chosen) / max(1, len(chosen))
+        typer.echo(f"pseudo-label accuracy (bench labels): {acc:.4f}")
+
+
 # Commands that later phases implement. They accept any arguments and exit with
 # code 2 so scripts never mistake a placeholder for a successful run.
 PLACEHOLDERS: dict[str, tuple[int, str]] = {
     "adapt": (9, "Convert raw competition files to canonical JSONL."),
-    "pseudo": (10, "Pseudo-label confident test predictions (off by default)."),
 }
 
 

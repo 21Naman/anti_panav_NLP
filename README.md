@@ -197,7 +197,51 @@ liars train --config configs/llm_qlora.yaml --set train.init_from_run=<stage1 ru
 
 ## Phase 7 — DeBERTa focus-marked multiple choice
 
+What it does: `models/deberta_mc.py` (AutoModelForMultipleChoice, initialised from the
+Phase 3 NLI DeBERTa). For each chat, 4 choices (one per speaker X): text_a = "Evidence: "
++ facts, text_b = the chat with X's lines wrapped in `<t> ... </t>` (special tokens added,
+embeddings resized) + "Is the marked speaker contradicting the evidence?". Softmax across
+the 4 choices. Truncation keeps all evidence and every X line; other speakers' lines
+furthest from X's lines go first. fp16 + gradient scaler on CUDA, gradient accumulation,
+cosine LR with warmup, early stopping on an inner split, optional layer-wise LR decay,
+speaker-permutation augmentation, TTA at inference. Two-stage training via `--stage`:
+stage 1 = one holdout run on `stage1.jsonl` (5% holdout) that saves the model, stage 2 =
+5-fold starting from `latest:deberta_mc_s1`.
+
+How to run:
+```bash
+liars train --config configs/deberta_mc.yaml --stage 1 --debug    # CPU, xsmall, ~20 s
+liars train --config configs/deberta_mc.yaml --stage 2 --debug    # CPU, 5 folds from stage 1, ~70 s
+liars folds --in data/bench/stage1.jsonl --k 20                    # 5% holdout for stage 1
+liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl   # 5-fold, GPU
+```
+
 ## Phase 8 — Ensemble, error analysis, rules
+
+What it does:
+- `ensemble.py` (`liars ensemble`) — aligns OOF files on the ids every run has (the
+  holdout fold when a holdout run is included), then compares each run, `mean`,
+  `weighted` (non-negative weights on OOF log-loss) and `stack` (conditional logit on
+  per-speaker p / log p / rank of each run + rule scores, shared weights, softmax over 4).
+  Weighted and stack are scored with an inner K-fold, so their accuracy is honest.
+  `--method auto` picks the best of mean/weighted, and stack only if it is > 0.3 points
+  better. Writes `data/oof/ens_<name>.parquet` and `data/preds/ens_<name>.parquet`.
+- `analysis.py` (`liars analyze`) — `data/reports/<run>.html`: accuracy per fold /
+  lie_type / chat length / true label, confusion matrix, calibration, the most confident
+  mistakes (true liar red, predicted blue), and disagreements with `--compare`.
+- `features/rules.py` — `Rule` interface + registry, two generic rules
+  (`number_mismatch`, `day_time_mismatch` with "6 PM" == "18:00", "Fri" == "Friday").
+  `liars rules` writes `data/features/rules_<stem>.parquet` (id, speaker, rule, score);
+  the stacker picks these up automatically. `liars rules-report` shows coverage and
+  precision per rule and lie_type.
+
+How to run:
+```bash
+liars rules --in data/bench/train.jsonl && liars rules --in data/bench/test.jsonl
+liars rules-report --in data/bench/train.jsonl
+liars ensemble --runs <run1> <run2> <run3> --name bench --method auto
+liars analyze --run <run> --compare <run2> --n 50
+```
 
 ## Phase 9 — Dress rehearsal
 
