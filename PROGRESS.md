@@ -5,9 +5,9 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 5 — not started
-- Last completed phase: 4 (Kaggle packaging + first GPU run) — done
-- Next step: start Phase 5 (open-LLM zero-shot + model benchmark)
+- Current phase: 6 — not started
+- Last completed phase: 5 (open-LLM zero-shot + benchmark) — done
+- Next step: start Phase 6 (QLoRA on google/gemma-4-12B-it; fallback Qwen/Qwen3-14B)
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -48,11 +48,11 @@
 - Hugging Face: NO gated-model licences accepted. Phase 5: prefer non-gated models. If
   a gated model looks clearly better, tell the user which model page to open and
   accept, and wait.
-- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~0.2 h (week of 2026-10-26)
-- GPU hours used in prep (account panavrg): 0.17 h (Phase 4 NLI run)
-- Best result so far: nli_zeroshot_1026-223959 (Kaggle) — kfold — 71.2% OOF bench train / 73.4% bench test — DeBERTa-v3-large NLI zero-shot, joint mode
+- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~1.8 h (week of 2026-10-26)
+- GPU hours used in prep (account panavrg): 1.8 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h)
+- Best result so far: llm_zeroshot_1026-232702 (Kaggle) — holdout — 84.5% fold 0 / 84.3% bench test — gemma-4-12B-it zero-shot, 4-bit, TTA 2, T=2.0. (NLI-large: 71.2% OOF / 73.4% test)
 - Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
-- LLM benchmark winner: (model id — zero-shot acc — chats/min on T4)
+- LLM benchmark winner: google/gemma-4-12B-it (Apache-2.0, not gated) — 82.4% zero-shot on 500 bench chats (no TTA) — 110 chats/min on T4 4-bit (66/min with TTA 2), 10.0 GiB. Fallback: Qwen/Qwen3-14B 69.4% (needs prompt.answer_prefix="Answer:")
 - QLoRA time per epoch on T4: (model id — examples — max_len — hours)
 - Template packs available: default (neutral sentences), alt (casual texting) — src/liars/synth/templates/
 - Benchmark sets: data/bench/{stage1 (15k default mixed, seed 101), train (2k alt med+hard, seed 202, first_names), test (1k alt, seed 303, labels hidden) + test_labels.csv}. Regenerate: README Phase 1.
@@ -377,3 +377,68 @@ Claude appends one entry per phase using this template:
   run on the laptop, and zips the results — so nothing about a run lives in the notebook.
   A script pushes it from the terminal and pulls the results back into data/.
 - Commit: (see git log, "phase 4: ...")
+
+### Phase 5 — Open-LLM zero-shot scoring + model benchmark
+- Status: done
+- Date: 2026-10-27
+- Built:
+  - `prompt.py` -> `build_user_text` (intro, numbered evidence, "S: text" chat, question; all
+    strings in config `prompt:`), `drop_order` / `fit_to_budget` (keep all evidence; drop
+    lines sharing no evidence word with another line first, then the most isolated).
+  - `llm.py` -> `load_lm` (4-bit NF4 + fp16 compute + double quant on CUDA; fp32 CPU; falls
+    back to AutoModelForImageTextToText for multimodal checkpoints), `render` (chat
+    template, `chat_template_kwargs`, list-content fallback), `letter_token_ids` (diff of
+    tokenised prompt with/without the letter; " A" after text, "A" after whitespace;
+    cached per answer_prefix), `prompt_for` (truncation to llm.max_len), `score_prompts`
+    (length-sorted left-padded batches, logits_to_keep=1, NaN rows -> uniform, memo by
+    prompt hash, chats/min + max GPU memory), `get_lm` (one model per process).
+  - `augment.py` -> permute_speakers, shuffle_evidence, tta_variants (identity + cyclic
+    shifts first, then random), map_back.
+  - `models/llm_zeroshot.py` -> TTA-averaged softmax of letter logits; fit = few-shot pick +
+    temperature (calib_n training-fold examples); report() with speed/memory/NaN/truncation.
+  - `config.parse_value`: `--set x=Answer:` stays a string (YAML made it a mapping; cost one
+    failed Kaggle run).
+- Files: src/liars/{prompt,llm,augment}.py, models/llm_zeroshot.py, configs/llm_zeroshot.yaml,
+  tests/{test_augment,test_prompt,test_llm}.py (TTA mapping test = test_tta_maps_permuted_predictions_back).
+- Commands: benchmark (per model, Kaggle):
+  `liars train --config configs/llm_zeroshot.yaml --set data.train=data/bench/train_sub500.jsonl --set data.test=null --set train.mode=kfold --set llm.calib_n=0 --set augment.tta_n=1 --set llm.model_id=<id>`
+  winner: `liars train --config configs/llm_zeroshot.yaml --test data/bench/test.jsonl --set llm.model_id=google/gemma-4-12B-it --set augment.tta_n=2 --set llm.calib_n=100`
+- Benchmark (500 bench-train chats = data/bench/train_sub500.jsonl, zero-shot, 4-bit NF4,
+  fp16, T4, no TTA, no calibration; all non-gated; Llama-3.1-8B skipped = gated):
+  | model | acc | chats/min | GPU GiB | fp16 NaN | day | impl | loc | neg | num | owner | time | 2step |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | google/gemma-4-12B-it | **0.824** | 110 | 9.9 | 0 | .90 | .55 | .89 | .95 | .98 | .91 | .90 | .55 |
+  | Qwen/Qwen3-14B + "Answer:" | 0.694 | 104 | 10.8 | 0 | .84 | .33 | .67 | .80 | .88 | .79 | .77 | .55 |
+  | microsoft/phi-4 | 0.676 | 115 | 10.4 | 0 | .72 | .39 | .71 | .73 | .83 | .76 | .81 | .52 |
+  | Qwen/Qwen3.5-9B | 0.664 | 140 | 8.9 | 0 | .75 | .33 | .73 | .73 | .76 | .77 | .73 | .55 |
+  | Qwen/Qwen3-8B + "Answer:" | 0.496 | 183 | 7.0 | 0 | .57 | .28 | .48 | .55 | .66 | .57 | .56 | .34 |
+  | Qwen/Qwen3-14B (no prefix) | 0.432 | 110 | 10.8 | 0 | predicts A 76% of the time |
+  | Qwen/Qwen3-8B (no prefix) | 0.308 | 201 | 6.9 | 0 | predicts D/A only |
+  | Qwen/Qwen3-4B-Instruct-2507 (no prefix) | 0.242 | 333 | 3.7 | 0 | predicts C 99% |
+  Winner run llm_zeroshot_1026-232702 (gemma-4-12B-it, holdout, TTA 2, calib 100 -> T=2.0):
+  **holdout fold 0: 0.845 (400); bench test: 0.843 (1000)**; test by type: number .97, time
+  .94, negation .93, owner .90, location .90, day .86, implicit .62, two_step .62; hard .78,
+  med .91; per true label .82–.86 (no position bias); 66 chats/min, 10.0 GiB, 0 NaN; 1577 s.
+  NLI-large for comparison: 73.4% test.
+- Done-when checks: debug < 2 min on CPU pass (1:47 cold incl. 1 GB download, 17 s warm);
+  TTA mapping test pass; benchmark table + winner in Key facts pass; winner holdout + test
+  logged pass; pytest 110 passed pass.
+- Decisions & deviations:
+  - Candidates checked on the Hub 2026-10-27 (licence + gated flag). Newest dense models are
+    multimodal checkpoints (gemma-4, Qwen3.5, Ministral-3); loaded via
+    AutoModelForImageTextToText fallback, text-only prompts.
+  - Benchmark without TTA/calibration (raw, same for all); winner run with TTA 2 (little
+    position bias) to save GPU.
+  - Qwen3 collapse diagnosed: next-token top-5 = "The", "Based", "Speaker" (prose, not a
+    letter), also in fp32 on CPU -> prompt-format artifact, fixed by answer_prefix
+    "Answer:". Gemma answers with a letter directly, prefix not needed.
+- Known issues / TODO: implicit and two_step lies are the weak spots for every model
+  (~0.55–0.62). Gemma-4 is a multimodal wrapper: Phase 6 must put LoRA on the language model
+  only and watch fp16 overflow in training (no bf16 on T4). Fallback base: Qwen3-14B.
+- Explain-it-to-me: we never let the LLM write an answer. We show it the evidence and the
+  chat, stop right where the answer would start, and read how likely it thinks each of
+  "A", "B", "C", "D" is as the next token — a 4-way probability with no parsing. Models
+  have a bias toward some letters, so we also ask with the speakers renamed (TTA) and
+  average after mapping the letters back. A model that "wants" to start with "The answer
+  is…" gives meaningless letter scores, which is why Qwen3 needed an "Answer:" prefix.
+- Commit: (see git log, "phase 5: ...")
