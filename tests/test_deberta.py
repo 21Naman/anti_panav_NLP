@@ -114,3 +114,37 @@ def test_fp16_checkpoint_loads_as_fp32(tmp_path):
     m.dcfg = load_config(ROOT / "configs" / "deberta_mc.yaml", ["deberta.device=cpu"])["deberta"]
     m._load(str(tmp_path), add_marks=True)
     assert {p.dtype for p in m.model.parameters()} == {torch.float32}
+
+
+@pytest.mark.parametrize("retries", [1, 0])
+def test_collapse_guard_restarts(tiny, retries):
+    import torch
+    from liars.models.deberta_mc import _Collapsed
+    cfg = load_config(ROOT / "configs" / "deberta_mc.yaml",
+                      ["deberta.device=cpu", f"deberta.collapse_retries={retries}"])
+    m = DebertaMCModel()
+    m.log = lambda *a: None
+    attempts = []
+
+    def fake_train(train, val, cfg, attempt):  # attempt 0 collapses, the restart is healthy
+        attempts.append(attempt)
+        m.torch, m.device, m.model = torch, "cpu", torch.nn.Linear(1, 1)
+        if attempt == 0:
+            raise _Collapsed("step 77: val loss 1.3863, acc 0.26")
+        m.best_step = 5
+    m._train = fake_train
+    if retries:
+        m.fit(tiny[:4], None, cfg)
+        assert attempts == [0, 1] and m.restarts == 1
+    else:
+        with pytest.raises(RuntimeError, match="collapsed"):
+            m.fit(tiny[:4], None, cfg)
+        assert attempts == [0]
+
+
+def test_collapse_rule():
+    m = DebertaMCModel()
+    m.dcfg = load_config(ROOT / "configs" / "deberta_mc.yaml")["deberta"]
+    assert m._collapsed(77, 310, 0.26, 1.3863)        # the real collapsed run (2026-10-27)
+    assert not m._collapsed(47, 190, 0.4625, 1.3795)  # slow but healthy start (fold 0)
+    assert not m._collapsed(10, 310, 0.25, 1.3863)    # too early to judge

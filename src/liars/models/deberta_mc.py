@@ -9,6 +9,7 @@ and every line of X; other speakers' lines furthest from X's lines are dropped f
 from __future__ import annotations
 
 import copy
+import gc
 import json
 import math
 import random
@@ -19,6 +20,7 @@ from typing import Sequence
 import numpy as np
 
 from liars.augment import map_back, permute_speakers, shuffle_evidence, tta_variants
+from liars.config import seed_everything
 from liars.device import get_device
 from liars.models.base import Model
 from liars.preds import make_preds, softmax
@@ -55,6 +57,10 @@ def keep_for_choice(ex: Example, speaker: str, line_lens: Sequence[int], fixed: 
         total -= cost[i]
         dropped += 1
     return sorted(keep), dropped
+
+
+class _Collapsed(Exception):
+    pass
 
 
 class DebertaMCModel(Model):
@@ -130,12 +136,13 @@ class DebertaMCModel(Model):
             return self.model(input_ids=ids, attention_mask=mask).logits.float()
 
     # ------------------------------------------------------------------ training
-    def _optimizer(self):
+    def _optimizer(self, lr_scale: float = 1.0):
         torch = self.torch
         d = self.dcfg
         decay = d["layerwise_lr_decay"]
+        base_lr = d["lr"] * lr_scale
         if decay >= 1.0:
-            return torch.optim.AdamW(self.model.parameters(), lr=d["lr"], weight_decay=d["weight_decay"])
+            return torch.optim.AdamW(self.model.parameters(), lr=base_lr, weight_decay=d["weight_decay"])
         layers = self.model.config.num_hidden_layers
         groups: dict[float, list] = {}
         for name, p in self.model.named_parameters():
@@ -145,7 +152,7 @@ class DebertaMCModel(Model):
                 depth = int(name.split(".layer.")[1].split(".")[0]) + 1
             else:
                 depth = layers + 1  # pooler / classifier head
-            lr = d["lr"] * decay ** (layers + 1 - depth)
+            lr = base_lr * decay ** (layers + 1 - depth)
             groups.setdefault(lr, []).append(p)
         return torch.optim.AdamW([{"params": ps, "lr": lr} for lr, ps in groups.items()],
                                  weight_decay=d["weight_decay"])
@@ -180,24 +187,66 @@ class DebertaMCModel(Model):
         self.tta_n = cfg["augment"]["tta_n"]
         self.n_truncated = 0
         refit = cfg["train"].get("_refit") or {}
+        retries = d.get("collapse_retries", 0)
+        self.restarts = 0
+        for attempt in range(retries + 1):
+            try:
+                self._train(train, val, cfg, attempt)
+                break
+            except _Collapsed as e:
+                why = str(e)
+            if attempt == retries:
+                raise RuntimeError(f"training collapsed {attempt + 1} time(s): {why}")
+            self.restarts += 1
+            self.log(f"COLLAPSED ({why}); restarting from fresh weights, training seed "
+                     f"{cfg['seed'] + attempt + 1}, lr x {d['collapse_lr_factor'] ** (attempt + 1):.2f}")
+            self.model = None  # free the collapsed model before loading a fresh one
+            gc.collect()
+            if self.device == "cuda":
+                self.torch.cuda.empty_cache()
+        torch = self.torch
+        self.max_mem_gb = (round(torch.cuda.max_memory_allocated() / 2**30, 2)
+                           if self.device == "cuda" else None)
+        self.model.eval()
+        self.temperature = refit.get("temperature", 1.0)
+        if val:
+            logits = self._tta_logits(val)
+            yv = np.array([SPEAKERS.index(ex.label) for ex in val])
+            self.temperature = min(d["temperatures"], key=lambda t: _nll(self._probs(logits, t), yv))
+        save_dir = cfg["train"].get("_save_dir")
+        if d["save_model"] and save_dir:
+            self.save(Path(save_dir))
+
+    def _collapsed(self, step: int, total_steps: int, acc: float, vloss: float) -> bool:
+        """All 4 choices scored alike: val loss ~ ln 4 and chance accuracy, past the warm-up."""
+        d = self.dcfg
+        return (step >= d["collapse_check_frac"] * total_steps
+                and vloss >= math.log(len(SPEAKERS)) - d["collapse_loss_tol"]
+                and acc <= d["collapse_max_acc"])
+
+    def _train(self, train, val, cfg, attempt: int) -> None:
+        d = self.dcfg
+        refit = cfg["train"].get("_refit") or {}
         init = cfg["train"].get("_init_from")
+        seed_everything(cfg["seed"] + attempt)
         self._load(init or d["model_id"], add_marks=not init)
         torch = self.torch
-        if init:
+        if init and not attempt:
             self.log(f"initialised from {init}")
-        rng = random.Random(cfg["seed"])
+        rng = random.Random(cfg["seed"] + attempt)
 
-        lens = [max(len(ids) for ids in self._encode_example(ex)) for ex in train]
-        a = np.asarray(lens)
-        self.log(f"{len(train)} train / {len(val) if val else 0} val. tokens per choice: p50 "
-                 f"{np.percentile(a, 50):.0f}, p90 {np.percentile(a, 90):.0f}, p99 "
-                 f"{np.percentile(a, 99):.0f}, max {a.max()} (max_len {d['max_len']}); "
-                 f"chats with dropped lines: {self.n_truncated}")
+        if not attempt:
+            lens = [max(len(ids) for ids in self._encode_example(ex)) for ex in train]
+            a = np.asarray(lens)
+            self.log(f"{len(train)} train / {len(val) if val else 0} val. tokens per choice: p50 "
+                     f"{np.percentile(a, 50):.0f}, p90 {np.percentile(a, 90):.0f}, p99 "
+                     f"{np.percentile(a, 99):.0f}, max {a.max()} (max_len {d['max_len']}); "
+                     f"chats with dropped lines: {self.n_truncated}")
 
         mb, accum = d["micro_batch_size"], d["grad_accum"]
         steps_per_epoch = max(1, math.ceil(len(train) / mb) // accum)
         total_steps = refit.get("steps") or math.ceil(d["epochs"] * steps_per_epoch)
-        opt = self._optimizer()
+        opt = self._optimizer(d.get("collapse_lr_factor", 1.0) ** attempt)
         from transformers import get_cosine_schedule_with_warmup
 
         sched = get_cosine_schedule_with_warmup(opt, int(d["warmup_ratio"] * total_steps), total_steps)
@@ -242,6 +291,8 @@ class DebertaMCModel(Model):
                     self.history.append({"step": step, "val_acc": acc, "val_loss": vloss,
                                          "minutes": round((time.time() - t0) / 60, 1)})
                     self.log(f"step {step}/{total_steps} val acc {acc:.4f} loss {vloss:.4f}")
+                    if self._collapsed(step, total_steps, acc, vloss):
+                        raise _Collapsed(f"step {step}: val loss {vloss:.4f}, acc {acc:.3f}")
                     if (acc, -vloss) > (best["acc"], -best["loss"]):
                         best = {"acc": acc, "loss": vloss, "step": step,
                                 "state": {k: v.detach().cpu().clone() for k, v in self.model.state_dict().items()}}
@@ -262,17 +313,6 @@ class DebertaMCModel(Model):
             self.model.load_state_dict(best["state"])
         self.best_step = best["step"] if best["state"] is not None else step
         self.train_minutes = round((time.time() - t0) / 60, 1)
-        self.max_mem_gb = (round(torch.cuda.max_memory_allocated() / 2**30, 2)
-                           if self.device == "cuda" else None)
-        self.model.eval()
-        self.temperature = refit.get("temperature", 1.0)
-        if val:
-            logits = self._tta_logits(val)
-            yv = np.array([SPEAKERS.index(ex.label) for ex in val])
-            self.temperature = min(d["temperatures"], key=lambda t: _nll(self._probs(logits, t), yv))
-        save_dir = cfg["train"].get("_save_dir")
-        if d["save_model"] and save_dir:
-            self.save(Path(save_dir))
 
     # ------------------------------------------------------------------ inference
     def _tta_logits(self, examples: Sequence[Example]) -> np.ndarray:
@@ -319,6 +359,7 @@ class DebertaMCModel(Model):
         rows = [("model", self.dcfg["model_id"]), ("best step", self.best_step),
                 ("train minutes", self.train_minutes), ("temperature", self.temperature),
                 ("gradient checkpointing", bool(self.dcfg.get("gradient_checkpointing"))),
+                ("collapse restarts", getattr(self, "restarts", 0)),
                 ("max GPU memory GiB (training)", getattr(self, "max_mem_gb", None)),
                 ("tta_n", self.tta_n), ("choices with dropped lines (all encodes)", self.n_truncated)]
         lines = ["# DeBERTa MC report", "", "| item | value |", "|---|---|"]

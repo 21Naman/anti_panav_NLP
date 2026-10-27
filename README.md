@@ -214,7 +214,7 @@ stage 1 = one holdout run on `stage1.jsonl` (5% holdout) that saves the model, s
 How to run:
 ```bash
 liars train --config configs/deberta_mc.yaml --stage 1 --debug    # CPU, xsmall, ~20 s
-liars train --config configs/deberta_mc.yaml --stage 2 --debug    # CPU, 5 folds from stage 1, ~70 s
+liars train --config configs/deberta_mc.yaml --stage 2 --debug    # CPU, 3 folds from stage 1, ~40-80 s
 liars folds --in data/bench/stage1.jsonl --k 20                    # 5% holdout for stage 1
 liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl   # 5-fold, GPU
 ```

@@ -52,6 +52,15 @@ deberta:
   patience: 3
   time_probe_steps: 20
   max_gpu_hours: 4.0         # abort after the time probe if the remaining fits would take longer
+  # Collapse guard: DeBERTa-v3-large sometimes gets stuck scoring all 4 choices alike
+  # (val loss = ln 4 = 1.386, chance accuracy). From collapse_check_frac of the steps on, an
+  # eval with val loss >= ln 4 - collapse_loss_tol AND val acc <= collapse_max_acc restarts
+  # from fresh weights with training seed + 1 and lr x collapse_lr_factor.
+  collapse_check_frac: 0.2
+  collapse_loss_tol: 0.005
+  collapse_max_acc: 0.35
+  collapse_retries: 1
+  collapse_lr_factor: 0.67
   temperatures: [0.25, 0.5, 1.0, 2.0, 4.0]
   save_model: false         # kfold predictions are made in-run; stage 1 saves (see stages)
 
@@ -76,7 +85,7 @@ debug:
   data:
     train: tests/fixtures/tiny.jsonl
     test: tests/fixtures/tiny.jsonl
-  cv: {k: 5}
+  cv: {k: 3}             # 3 folds keep stage 2 debug < 2 min even in macOS Low Power Mode
   deberta:
     model_id: cross-encoder/nli-deberta-v3-xsmall
     device: cpu
@@ -86,5 +95,7 @@ debug:
     epochs: 1
     eval_every_frac: 0.5
     time_probe_steps: 2
+    collapse_check_frac: 2.0    # off: xsmall on 32 chats always looks 'collapsed'
+    gradient_checkpointing: false   # not needed for xsmall on CPU; keeps debug < 2 min
   augment:
     tta_n: 2
