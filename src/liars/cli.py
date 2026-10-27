@@ -240,14 +240,93 @@ def predict(
     typer.echo(f"{len(preds)} predictions from {mdir} -> {path}")
 
 
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def ensemble(
+    ctx: typer.Context,
+    runs: list[str] = typer.Option(..., "--runs", help="Run names: --runs r1 r2 r3 (or comma-separated)."),
+    method: str = typer.Option("auto", help="auto | mean | weighted | stack"),
+    name: str = typer.Option(..., "--name"),
+    config: Path = typer.Option(Path("configs/ensemble.yaml"), "--config"),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Combine runs on their aligned held-out predictions (honest inner-CV scores)."""
+    from liars.ensemble import run_ensemble
+    from liars.paths import get_paths
+
+    names = [r for item in [*runs, *ctx.args] for r in item.split(",") if r]
+    cfg = load_config(config, set_)
+    run_ensemble(get_paths(cfg), names, method, name, cfg["ensemble"], log=typer.echo)
+
+
+@app.command()
+def analyze(
+    run: str = typer.Option(..., "--run"),
+    compare: str = typer.Option(None, "--compare", help="Second run: show disagreements."),
+    n: int = typer.Option(50, "--n", help="How many examples to show."),
+    data: Path = typer.Option(None, "--data", help="Labelled canonical file (default: the run's data.train)."),
+    config: Path = typer.Option(Path("configs/ensemble.yaml"), "--config"),
+) -> None:
+    """HTML error-analysis report of a run's held-out predictions -> data/reports/<run>.html."""
+    import pandas as pd
+    import yaml
+
+    from liars.analysis import build_report, write_report
+    from liars.paths import get_paths
+
+    cfg = load_config(config)
+    paths = get_paths(cfg)
+    if data is None:
+        run_yaml = paths.run_configs / f"{run}.yaml"
+        if not run_yaml.exists():
+            typer.echo(f"no {run_yaml}; pass --data <labelled canonical file>")
+            raise typer.Exit(code=1)
+        data = Path(yaml.safe_load(open(run_yaml))["data"]["train"])
+    oof = pd.read_parquet(paths.oof / f"{run}.parquet")
+    other = (compare, pd.read_parquet(paths.oof / f"{compare}.parquet")) if compare else None
+    html = build_report(run, oof, load_jsonl(data), cfg["analysis"], n, other)
+    path = write_report(paths.reports / f"{run}.html", html)
+    typer.echo(f"report -> {path.resolve()}")
+
+
+@app.command()
+def rules(
+    in_path: Path = InPath,
+    out: Path = typer.Option(None, "--out", help="Default: data/features/rules_<stem>.parquet"),
+    only: str = typer.Option(None, "--rules", help="Comma-separated rule names (default: all)."),
+) -> None:
+    """Compute rule scores (long format: id, speaker, rule, score)."""
+    from liars.features.rules import compute_rules
+    from liars.paths import get_paths
+
+    df = compute_rules(load_jsonl(in_path), only.split(",") if only else None)
+    path = out or get_paths().features / f"rules_{in_path.stem}.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, index=False)
+    fired = df[df["score"] > 0].groupby("rule")["id"].nunique()
+    typer.echo(f"{df['id'].nunique()} chats, rules {sorted(df['rule'].unique())} -> {path}")
+    typer.echo("chats where each rule fires: " + ", ".join(f"{r} {v}" for r, v in fired.items()))
+
+
+@app.command("rules-report")
+def rules_report_cmd(in_path: Path = InPath) -> None:
+    """Coverage and precision of each rule, overall and per lie_type (labelled data)."""
+    from liars.features.rules import compute_rules, rules_report
+    from liars.paths import get_paths
+
+    examples = load_jsonl(in_path)
+    rep = rules_report(examples, compute_rules(examples))
+    text = rep.to_string(index=False, float_format=lambda v: f"{v:.3f}")
+    typer.echo(text)
+    path = get_paths().reports / f"rules_{in_path.stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("```\n" + text + "\n```\n", encoding="utf-8")
+    typer.echo(f"report -> {path}")
+
+
 # Commands that later phases implement. They accept any arguments and exit with
 # code 2 so scripts never mistake a placeholder for a successful run.
 PLACEHOLDERS: dict[str, tuple[int, str]] = {
     "adapt": (9, "Convert raw competition files to canonical JSONL."),
-    "rules": (8, "Compute rule features."),
-    "rules-report": (8, "Coverage and precision of each rule."),
-    "ensemble": (8, "Combine runs (mean / weighted / stack)."),
-    "analyze": (8, "HTML error-analysis report for a run."),
     "pseudo": (10, "Pseudo-label confident test predictions (off by default)."),
 }
 
