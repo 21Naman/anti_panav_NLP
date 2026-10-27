@@ -7,7 +7,9 @@ speaker permutations (augment.tta_n), mapped back to the original speakers.
 
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -18,6 +20,8 @@ from liars.models.base import Model
 from liars.preds import make_preds, softmax
 from liars.prompt import build_user_text
 from liars.schema import SPEAKERS, Example
+
+META_FILE = "model_meta.json"
 
 
 def _nll(probs: np.ndarray, y: np.ndarray) -> float:
@@ -44,6 +48,29 @@ class LLMZeroShotModel(Model):
             y = np.array([SPEAKERS.index(ex.label) for ex in cal])
             self.temperature = min(self.lcfg["temperatures"],
                                    key=lambda t: _nll(self._probs(logits, t), y))
+        save_dir = cfg["train"].get("_save_dir")
+        if save_dir and self.lcfg.get("save_model", True):
+            self.save(Path(save_dir))
+
+    def save(self, path: Path) -> None:
+        """Nothing is trained: the temperature + few-shot texts are enough to reload
+        (`liars predict`, e.g. split across both T4s)."""
+        path.mkdir(parents=True, exist_ok=True)
+        meta = {"base_model": self.lcfg["model_id"], "temperature": self.temperature,
+                "answer_prefix": self.pcfg.get("answer_prefix", ""),
+                "fewshot": [list(x) for x in self.fewshot]}
+        (path / META_FILE).write_text(json.dumps(meta, indent=1))
+
+    @classmethod
+    def load(cls, path: Path, cfg: dict) -> "LLMZeroShotModel":
+        m = cls()
+        m.cfg, m.lcfg, m.pcfg = cfg, cfg["llm"], cfg["prompt"]
+        m.tta_n = cfg["augment"]["tta_n"]
+        meta = json.loads((Path(path) / META_FILE).read_text())
+        m.h = get_lm(m.lcfg)
+        m.fewshot = [tuple(x) for x in meta.get("fewshot", [])]
+        m.temperature = meta["temperature"]
+        return m
 
     def _tta_logits(self, examples: Sequence[Example]) -> np.ndarray:
         """(n, tta_n, 4) letter logits in ORIGINAL speaker order."""

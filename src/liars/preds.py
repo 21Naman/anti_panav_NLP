@@ -74,3 +74,28 @@ def save_preds(df: pd.DataFrame, path: str | Path) -> None:
 def accuracy(df: pd.DataFrame, labels: pd.Series) -> float:
     """labels: Series indexed like df (letters)."""
     return float((argmax_letter(df).to_numpy() == np.asarray(labels)).mean())
+
+
+def split_shards(items: list, n: int) -> list[list]:
+    """n contiguous, near-equal shards (order kept) for multi-GPU prediction."""
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    size, extra = divmod(len(items), n)
+    out, start = [], 0
+    for i in range(n):
+        end = start + size + (i < extra)
+        out.append(items[start:end])
+        start = end
+    return out
+
+
+def merge_shards(parts: list[pd.DataFrame], expected_ids: list[str]) -> pd.DataFrame:
+    """Concatenate shard predictions; every expected id exactly once, in input order."""
+    df = pd.concat(parts, ignore_index=True)
+    errors = check_preds(df)
+    if errors:
+        raise ValueError(f"merged shards: {errors}")
+    got, want = set(df["id"]), set(expected_ids)
+    if got != want:
+        raise ValueError(f"merged shards: {len(want - got)} ids missing, {len(got - want)} unexpected")
+    return df.set_index("id").loc[list(expected_ids)].reset_index()

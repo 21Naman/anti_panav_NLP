@@ -215,10 +215,13 @@ def predict(
     in_path: Path = InPath,
     model_dir: Path = typer.Option(None, "--model-dir", help="Default: data/models/<run>/full or fold0."),
     out: Path = typer.Option(None, "--out", help="Default: data/preds/<run>__<input stem>.parquet"),
+    test_preds: bool = typer.Option(False, "--test-preds",
+                                    help="Write data/preds/<run>.parquet (what `liars ensemble` reads as this run's test preds)."),
+    gpus: int = typer.Option(1, "--gpus", help="Split the input across N processes, one per GPU (Kaggle T4 x2: 2), then merge."),
     data_dir: Path = typer.Option(Path("data"), "--data-dir", help="Where data/runs/<run>.yaml lives."),
     set_: list[str] = SetOpt,
 ) -> None:
-    """Predict a canonical file with a saved model (e.g. QLoRA adapters)."""
+    """Predict a canonical file with a saved model (QLoRA adapters, zero-shot LLM, DeBERTa)."""
     import yaml
 
     from liars.config import apply_overrides
@@ -234,8 +237,17 @@ def predict(
         typer.echo(f"model {cfg['model']['name']!r} cannot be reloaded; re-run `liars train` with --test")
         raise typer.Exit(code=1)
     mdir = model_dir or resolve_model_dir(get_paths(cfg), run)
-    preds = cls.load(mdir, cfg).predict_proba(load_jsonl(in_path))
-    path = out or get_paths(cfg).preds / f"{run}__{in_path.stem}.parquet"
+    if test_preds and out:
+        raise typer.BadParameter("use either --out or --test-preds")
+    path = out or (get_paths(cfg).preds / f"{run}.parquet" if test_preds
+                   else get_paths(cfg).preds / f"{run}__{in_path.stem}.parquet")
+    if gpus > 1:
+        from liars.multigpu import predict_sharded
+
+        preds = predict_sharded(run, in_path, mdir, gpus, data_dir, set_, get_paths(cfg).cache,
+                                log=typer.echo)
+    else:
+        preds = cls.load(mdir, cfg).predict_proba(load_jsonl(in_path))
     save_preds(preds, path)
     typer.echo(f"{len(preds)} predictions from {mdir} -> {path}")
 

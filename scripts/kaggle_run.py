@@ -27,6 +27,7 @@ import tarfile
 import tempfile
 import time
 import zipfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -256,10 +257,54 @@ def cmd_code(a) -> None:
     print(f"code dataset {a.slug} = commit {git('rev-parse', '--short', 'HEAD')} (committed files only)")
 
 
+def dataset_commit(slug: str) -> str:
+    """Commit hash stored in the private code dataset ('' if unknown)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        kaggle("datasets", "download", f"{kaggle_user()}/{slug}", "-f", "COMMIT", "-p", tmp, "-q", check=False)
+        f = Path(tmp) / "COMMIT"
+        if not f.exists():
+            for z in Path(tmp).glob("*.zip"):
+                zipfile.ZipFile(z).extractall(tmp)
+        return f.read_text().strip() if f.exists() else ""
+
+
+def dataset_is_private(slug: str) -> bool:
+    with tempfile.TemporaryDirectory() as tmp:
+        kaggle("datasets", "metadata", f"{kaggle_user()}/{slug}", "-p", tmp)
+        meta = json.loads(next(Path(tmp).glob("*.json")).read_text())
+    meta = meta.get("info", meta)  # the CLI nests the fields under "info"
+    return bool(meta.get("isPrivate", meta.get("is_private", False)))
+
+
+def refresh_code(head: str, slug: str = None, current=dataset_commit, upload=None,
+                 poll_s: int = 15, timeout_s: int = 900, sleep=time.sleep) -> bool:
+    """Upload the code snapshot if the dataset holds another commit; wait until Kaggle serves
+    it. Returns True if an upload happened."""
+    slug = slug or CODE_DATASET
+    if current(slug) == head:
+        print(f"code dataset {slug} already at {head[:8]}")
+        return False
+    (upload or (lambda: cmd_code(argparse.Namespace(slug=slug))))()
+    waited = 0
+    while current(slug) != head:
+        if waited >= timeout_s:
+            raise SystemExit(f"code dataset {slug} still not at {head[:8]} after {timeout_s}s")
+        sleep(poll_s)
+        waited += poll_s
+    print(f"code dataset {slug} now serves {head[:8]}")
+    return True
+
+
 def cmd_push(a) -> None:
-    if git("status", "--porcelain", "--untracked-files=no"):
-        print("WARNING: uncommitted changes are NOT in the run (it uses the pushed commit).")
+    if git("status", "--porcelain", "--untracked-files=no") and not a.allow_dirty:
+        raise SystemExit("uncommitted changes: the run would NOT include them. Commit first "
+                         "(or pass --allow-dirty to run the last commit anyway).")
     ref = a.ref or git("rev-parse", "HEAD")
+    if a.code in ("dataset", "auto") and not a.no_code_refresh:
+        refresh_code(git("rev-parse", "HEAD"))
+    for s_ in [*(a.datasets or DEFAULT_DATASETS), CODE_DATASET]:
+        if not dataset_is_private(s_):
+            raise SystemExit(f"dataset {s_} is PUBLIC: make it private on Kaggle before running")
     if a.code != "dataset" and not a.ref and not git("branch", "-r", "--contains", ref):
         raise SystemExit("HEAD is not pushed to origin. Either `git push`, or upload the code "
                          "dataset (`kaggle_run.py code`) and push with --code dataset.")
@@ -280,6 +325,7 @@ def cmd_push(a) -> None:
     (d / "kernel-metadata.json").write_text(json.dumps(meta, indent=1))
     r = kaggle("kernels", "push", "-p", str(d), "--accelerator", a.accelerator)
     print(r.stdout.strip())
+    (d / "PUSHED_REF").write_text(ref + "\n")
     print(f"pushed {user}/{slug} @ {ref[:8]}: {a.cmd}")
     if a.wait:
         cmd_wait(a)
@@ -347,13 +393,26 @@ def cmd_fetch(a) -> None:
     out = ROOT / "data" / "kaggle" / a.name
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
-    kaggle("kernels", "output", f"{kaggle_user()}/{kernel_slug(a.name)}", "-p", str(out))
+    for attempt in range(3):  # flaky DNS / network: retry the download
+        r = kaggle("kernels", "output", f"{kaggle_user()}/{kernel_slug(a.name)}", "-p", str(out),
+                   check=False)
+        if r.returncode == 0:
+            break
+        print(f"download failed (attempt {attempt + 1}/3), retrying in 20 s")
+        time.sleep(20)
+    else:
+        raise SystemExit(f"could not download outputs: {(r.stdout + r.stderr)[-500:]}")
     print("downloaded:", ", ".join(p.name for p in out.iterdir()))
     z = out / "outputs.zip"
     if not z.exists():
         raise SystemExit(f"no outputs.zip in {out} (did the run fail? see the .log file there)")
     for line in merge_outputs(z):
         print("  +", line)
+    pushed, timing = BUILD / a.name / "PUSHED_REF", ROOT / "data" / "logs" / "kaggle_timing.json"
+    if pushed.exists() and timing.exists():
+        src = json.loads(timing.read_text()).get("code_source", "")
+        if pushed.read_text().strip()[:7] not in src:
+            print(f"WARNING: the run used {src!r}, not the pushed commit {pushed.read_text().strip()[:8]}")
 
 
 def cmd_merge(a) -> None:
@@ -388,6 +447,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--code", choices=["auto", "git", "dataset"], default="auto",
                    help="where the notebook gets the code (dataset = private liars-code snapshot)")
     p.add_argument("--wait", action="store_true")
+    p.add_argument("--no-code-refresh", action="store_true",
+                   help="skip re-uploading the code snapshot (default: upload if HEAD changed)")
+    p.add_argument("--allow-dirty", action="store_true",
+                   help="push even with uncommitted changes (they are NOT in the run)")
     p.set_defaults(fn=cmd_push)
     for name, fn in (("status", cmd_status), ("wait", cmd_wait), ("fetch", cmd_fetch)):
         p = sub.add_parser(name)

@@ -57,3 +57,31 @@ def test_merge_outputs(tmp_path):
     with open(data / "runs.csv") as f:
         assert [r["run"] for r in csv.DictReader(f)] == ["old", "new"]
     assert any("runs.csv += new" in a for a in added)
+
+
+def test_refresh_code_uploads_only_when_commit_changed():
+    state = {"commit": "old", "uploads": 0}
+
+    def upload():
+        state["uploads"] += 1
+        state["pending"] = 2  # Kaggle serves the new version after 2 polls
+
+    def current(slug):
+        if state.get("pending"):
+            state["pending"] -= 1
+            if not state["pending"]:
+                state["commit"] = "new"
+        return state["commit"]
+
+    assert kr.refresh_code("new", "liars-code", current, upload, sleep=lambda s: None) is True
+    assert state["uploads"] == 1
+    assert kr.refresh_code("new", "liars-code", current, upload, sleep=lambda s: None) is False
+    assert state["uploads"] == 1
+
+
+def test_push_refuses_dirty_tree(monkeypatch):
+    import pytest
+    monkeypatch.setattr(kr, "git", lambda *a: " M src/x.py" if a[0] == "status" else "abc")
+    args = kr.argparse.Namespace(allow_dirty=False)
+    with pytest.raises(SystemExit, match="uncommitted"):
+        kr.cmd_push(args)

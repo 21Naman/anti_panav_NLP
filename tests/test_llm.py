@@ -49,7 +49,7 @@ def test_tta_maps_permuted_predictions_back(tiny, monkeypatch):
     assert (p[PROB_COLS].to_numpy().argmax(1) == [SPEAKERS.index(e.label) for e in tiny]).all()
 
 
-def test_tiny_real_model_runs(tiny):
+def test_tiny_real_model_runs(tiny, tmp_path):
     """End-to-end on a 4 MB random Qwen2 (CPU): letter tokens, chat template, scoring."""
     try:
         from liars.llm import load_lm
@@ -58,10 +58,14 @@ def test_tiny_real_model_runs(tiny):
         pytest.skip(f"tiny model unavailable: {e}")
     cfg = _cfg(f"llm.model_id={TINY_LM}", "llm.device=cpu", "llm.load_in_4bit=false",
                "llm.calib_n=4", "augment.tta_n=2", "llm.fewshot_n=1", "llm.max_len=150")
+    cfg["train"]["_save_dir"] = str(tmp_path / "fold0")
     m = lz.LLMZeroShotModel()
     m.fit(tiny[:12], None, cfg)
     p = m.predict_proba(tiny[12:16])
     assert np.allclose(p[PROB_COLS].sum(axis=1), 1)
+    m2 = lz.LLMZeroShotModel.load(tmp_path / "fold0", cfg)  # reload = temperature + few-shot
+    assert m2.temperature == m.temperature and m2.fewshot == m.fewshot
+    assert np.allclose(m2.predict_proba(tiny[12:16])[PROB_COLS], p[PROB_COLS], atol=1e-5)
     assert len(set(m.h.letter_ids)) == 4
     assert "chats per minute" in m.report()
     assert m.h.stats["truncated"] > 0  # max_len 150 forces truncation with a few-shot example
