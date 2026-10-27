@@ -127,13 +127,14 @@ def train(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
     test: Path = typer.Option(None, "--test", help="Canonical test file (overrides data.test)."),
     debug: bool = typer.Option(False, "--debug", help="Tiny data/model on CPU; outputs to data/debug/."),
+    stage: int = typer.Option(None, "--stage", help="Apply the config's stages.<N> block (e.g. 1 or 2)."),
     set_: list[str] = SetOpt,
 ) -> None:
     """Train a model from a config (train.mode: kfold or holdout)."""
     from liars.trainer import run_training
 
     cfg = load_config(config, set_)
-    run_training(cfg, config, test, debug, log=typer.echo)
+    run_training(cfg, config, test, debug, log=typer.echo, stage=stage)
 
 
 @app.command()

@@ -51,7 +51,15 @@ def apply_debug(cfg: dict) -> dict:
 
 
 def resolve_model_dir(paths, run_or_path: str) -> Path:
-    """A saved-model directory from a run name (prefers 'full', then 'fold0') or a path."""
+    """A saved-model directory from a run name (prefers 'full', then 'fold0'), a path, or
+    'latest:<prefix>' (newest run under data/models whose name starts with prefix)."""
+    if run_or_path.startswith("latest:"):
+        prefix = run_or_path.split(":", 1)[1]
+        runs = sorted((d for d in paths.models.glob(f"{prefix}*") if d.is_dir()),
+                      key=lambda d: d.stat().st_mtime)
+        if not runs:
+            raise FileNotFoundError(f"no saved run matching {prefix!r}* under {paths.models}")
+        run_or_path = runs[-1].name
     p = Path(run_or_path)
     if p.is_dir():
         return p
@@ -93,7 +101,12 @@ def _resolve_folds(cfg: dict, train: Sequence[Example], train_path: str, debug: 
 
 
 def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | None = None,
-                 debug: bool = False, log=print) -> dict:
+                 debug: bool = False, log=print, stage: int | None = None) -> dict:
+    if stage is not None:  # config `stages: {1: {...}, 2: {...}}` overrides, before debug
+        stages = cfg.get("stages") or {}
+        if stage not in stages:
+            raise ValueError(f"config has no stages.{stage}")
+        cfg = deep_update(copy.deepcopy(cfg), stages[stage])
     if debug:
         cfg = apply_debug(cfg)
     paths = get_paths(cfg)
@@ -105,7 +118,8 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
     test = load_jsonl(test_path) if test_path else []
     folds = _resolve_folds(cfg, train, train_path, debug)
     mode = cfg["train"]["mode"]
-    run = f"{Path(config_path).stem}_{datetime.now().strftime('%m%d-%H%M%S')}"
+    stage_tag = f"_s{stage}" if stage is not None else ""
+    run = f"{Path(config_path).stem}{stage_tag}_{datetime.now().strftime('%m%d-%H%M%S')}"
     if debug:
         run += "_debug"
     log(f"run {run}: model={cfg['model']['name']} mode={mode} train={len(train)} test={len(test)}")

@@ -174,6 +174,27 @@ liars train --config configs/llm_zeroshot.yaml --set llm.model_id=Qwen/Qwen3-14B
 
 ## Phase 6 — QLoRA open-LLM classifier
 
+What it does: `models/llm_qlora.py` fine-tunes LoRA adapters (r 16, alpha 32, dropout
+0.05) on the attention + MLP projections of the language model of a 4-bit NF4 LLM
+(vision/audio towers excluded by `qlora.target_regex`). Same prompt as the zero-shot
+model; loss = cross-entropy over the 4 letter logits at the answer position. fp16 with a
+gradient scaler (T4: no bf16), gradient checkpointing, paged 8-bit AdamW, cosine schedule
+with warmup, early stopping on an inner split of the training folds (never the holdout
+fold), speaker-permutation augmentation, TTA at inference, temperature fit on the inner
+split. Prints the prompt-length distribution and a measured time per epoch after 20 steps
+and aborts above `qlora.max_gpu_hours` (default 4) or on persistent fp16 overflow.
+Adapters + `model_meta.json` are saved to `data/models/<run>/fold0` (and `full` with
+`train.refit_full`). `train.init_from_run` continues from saved adapters (stage 1 -> 2).
+
+How to run:
+```bash
+liars train --config configs/llm_qlora.yaml --debug                         # 0.5B on CPU, ~35 s
+liars train --config configs/llm_qlora.yaml --test data/bench/test.jsonl --set augment.tta_n=2   # Kaggle
+liars predict --run <run> --in data/bench/test.jsonl                         # saved adapters
+liars train --config configs/llm_qlora.yaml --set data.train=<stage1 file> ...   # stage 1, then
+liars train --config configs/llm_qlora.yaml --set train.init_from_run=<stage1 run>
+```
+
 ## Phase 7 — DeBERTa focus-marked multiple choice
 
 ## Phase 8 — Ensemble, error analysis, rules
