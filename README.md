@@ -70,12 +70,22 @@ liars synth ... --set 'synth.liar_position={A: 0.4, B: 0.2, C: 0.2, D: 0.2}'
 ```
 Readable samples (lie lines marked) go to `data/samples/synth_<pack>_<difficulty>.txt`.
 
-Benchmark sets (regenerate with these exact commands; `data/` is not in git):
+Benchmark sets (regenerate with these exact commands; `data/` is not in git). They were made
+before the ambiguity fix, so they need `synth.avoid_ambiguous_anaphors=false` to come out identical:
 ```bash
-liars synth --n 15000 --seed 101 --difficulty mixed --pack default --id-prefix s1_ --out data/bench/stage1.jsonl
-liars synth --n 2000 --seed 202 --difficulty med,hard --pack alt --id-prefix tr_ --set synth.speaker_names=first_names --out data/bench/train.jsonl
-liars synth --n 1000 --seed 303 --difficulty med,hard --pack alt --id-prefix te_ --set synth.speaker_names=first_names --out data/bench/test.jsonl --hide-labels data/bench/test_labels.csv
+A=--set=synth.avoid_ambiguous_anaphors=false
+liars synth --n 15000 --seed 101 --difficulty mixed --pack default --id-prefix s1_ $A --out data/bench/stage1.jsonl
+liars synth --n 2000 --seed 202 --difficulty med,hard --pack alt --id-prefix tr_ --set synth.speaker_names=first_names $A --out data/bench/train.jsonl
+liars synth --n 1000 --seed 303 --difficulty med,hard --pack alt --id-prefix te_ --set synth.speaker_names=first_names $A --out data/bench/test.jsonl --hide-labels data/bench/test_labels.csv
 ```
+
+Ambiguity fix (2026-10-27): `synth/ambiguity.py` flags "anchor ... it ..." pairs where another
+speaker mentions a different evidence item in between, so that the "it" line can be read as
+being about that item: an honest line then contradicts the evidence, or the lie reads as true.
+With `synth.avoid_ambiguous_anaphors: true` (default now) the generator re-draws those chats and
+`verify` treats any left as errors; the verify summary always prints the count. The frozen
+bench has 13.4% such chats (train 268/2000, test 132/1000). On them QLoRA scores 84% on test
+vs 98.7% on clean chats.
 
 ## Phase 2 — CV, trainer, baselines, leak check, submit, score
 

@@ -511,6 +511,8 @@ def difficulty_weights(difficulty: str, cfg: dict) -> dict[str, float]:
 def generate_many(n: int, seed: int, difficulty: str, pack: Pack, cfg: dict,
                   id_prefix: str | None = None) -> list[GenRecord]:
     """`cfg` is the `synth` section of configs/synth.yaml."""
+    from liars.synth.ambiguity import ambiguous_anaphors  # imports this module
+
     prefix = id_prefix if id_prefix is not None else f"{pack.name}_s{seed}_"
     master = random.Random(seed)
     labels = allocate_labels(master, n, liar_probs(cfg["liar_position"]))
@@ -526,6 +528,8 @@ def generate_many(n: int, seed: int, difficulty: str, pack: Pack, cfg: dict,
             world = build_world(rng, pack, cfg["world"])
             rec = generate_example(rng, world, pack, cfg, preset, f"{prefix}{i:06d}",
                                    labels[i], lie_type, diff)
+            if rec is not None and cfg.get("avoid_ambiguous_anaphors") and ambiguous_anaphors(rec):
+                continue  # an "it ..." line could refer to another item: re-draw the chat
             if rec is not None:
                 records.append(rec)
                 break

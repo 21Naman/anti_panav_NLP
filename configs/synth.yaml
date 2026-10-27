@@ -13,6 +13,9 @@ synth:
   n_samples: 20                 # readable examples written to data/samples/
   samples_dir: data/samples
   max_world_tries: 20
+  avoid_ambiguous_anaphors: true  # re-draw chats where an "it ..." line could refer to another
+                                  # item (honest line reads as a lie, or the lie reads as true).
+                                  # The frozen bench sets (2026-10-26) were made with false.
 
   world:
     n_entities: [4, 8]

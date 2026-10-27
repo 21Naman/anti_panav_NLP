@@ -77,7 +77,8 @@ def synth(
     t0 = time.time()
     records = generate_many(n, seed, difficulty, pack_obj, scfg, id_prefix)
     t_gen = time.time() - t0
-    report = verify_records(records, liar_probs(scfg["liar_position"]), cfg["verify"])
+    vcfg = dict(cfg["verify"], ambiguous_is_error=bool(scfg.get("avoid_ambiguous_anaphors")))
+    report = verify_records(records, liar_probs(scfg["liar_position"]), vcfg)
     examples = to_examples(records)
     write_synthetic(examples, out, hide_labels)
     typer.echo(f"generated {n} chats (pack={pack_obj.name}, difficulty={difficulty}, "

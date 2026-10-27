@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from liars.schema import SPEAKERS, validate
+from liars.synth.ambiguity import ambiguous_anaphors
 from liars.synth.programmatic import EXPLICIT_ATTRS, IMPLICIT_ATTRS, Claim, GenRecord
 from liars.synth.world import World
 
@@ -91,6 +92,7 @@ class VerifyReport:
     difficulty_counts: dict[str, int] = field(default_factory=dict)
     dup_rate: float = 0.0
     max_label_dev: float = 0.0
+    ambiguous: int = 0  # chats with an "it ..." line that could refer to another item
 
     @property
     def ok(self) -> bool:
@@ -98,7 +100,8 @@ class VerifyReport:
 
     def summary(self) -> str:
         lines = [f"verify: {self.n} examples, {len(self.errors)} errors, "
-                 f"duplicate rate {self.dup_rate:.4f}, max label deviation {self.max_label_dev:.4f}"]
+                 f"duplicate rate {self.dup_rate:.4f}, max label deviation {self.max_label_dev:.4f}, "
+                 f"ambiguous anaphor chats {self.ambiguous}"]
         lines.append("  labels: " + "  ".join(f"{s} {self.label_counts.get(s, 0)}" for s in SPEAKERS))
         lines.append("  lie types: " + "  ".join(f"{k} {v}" for k, v in sorted(self.lie_type_counts.items())))
         lines.append("  difficulty: " + "  ".join(f"{k} {v}" for k, v in sorted(self.difficulty_counts.items())))
@@ -113,6 +116,10 @@ def verify_records(records: list[GenRecord], expected_probs: dict[str, float],
     rep = VerifyReport(n=len(records))
     for rec in records:
         rep.errors += [f"{rec.example.id}: {e}" for e in verify_record(rec)]
+        amb = ambiguous_anaphors(rec)
+        rep.ambiguous += bool(amb)
+        if amb and vcfg.get("ambiguous_is_error"):
+            rep.errors += [f"{rec.example.id}: ambiguous: {a}" for a in amb]
 
     ids = Counter(r.example.id for r in records)
     rep.errors += [f"duplicate id {i}" for i, k in ids.items() if k > 1]

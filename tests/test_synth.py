@@ -155,3 +155,20 @@ def test_cli_synth(tmp_path):
     assert "0 errors" in result.output
     assert len(load_jsonl(out)) == 40
     assert (tmp_path / "synth_alt_mixed.txt").exists()
+
+
+def test_ambiguous_anaphors_flagged_and_avoided():
+    from liars.synth.ambiguity import ambiguous_anaphors
+    from liars.synth.pack import load_pack
+    from liars.synth.programmatic import generate_many
+
+    pack = load_pack("alt")
+    base = load_config(ROOT / "configs" / "synth.yaml", ["synth.avoid_ambiguous_anaphors=false"])["synth"]
+    old = generate_many(300, 7, "hard", pack, base)
+    flagged = [r for r in old if ambiguous_anaphors(r)]
+    assert flagged, "hard chats with anaphor pairs should include some ambiguous ones"
+    msg = ambiguous_anaphors(flagged[0])[0]
+    assert "could be about" in msg
+    new = generate_many(300, 7, "hard", pack, dict(base, avoid_ambiguous_anaphors=True))
+    assert not any(ambiguous_anaphors(r) for r in new)
+    assert Counter(r.lie_type for r in new) == Counter(r.lie_type for r in old)  # same mix
