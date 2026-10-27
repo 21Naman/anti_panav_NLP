@@ -158,6 +158,10 @@ python scripts/kaggle_run.py push --name nli-bench --code dataset \
   --cmd "liars train --config configs/nli_zeroshot.yaml --test data/bench/test.jsonl --set nli.progress=false" --wait
 python scripts/kaggle_run.py fetch --name nli-bench
 ```
+Safety (2026-10-27): `push` re-uploads the code snapshot by itself when HEAD changed (and waits
+until Kaggle serves it), refuses uncommitted changes (`--allow-dirty` overrides), and checks
+that every attached dataset is private. `fetch` retries flaky downloads and warns if the run
+used a different commit. `gpu_info.py` also saves `data/logs/pip_freeze_kaggle.txt`.
 
 ## Phase 5 — Open-LLM zero-shot scoring + model benchmark
 
@@ -207,6 +211,17 @@ liars train --config configs/llm_qlora.yaml --set train.init_from_run=<stage1 ru
 
 Bench result (Kaggle T4, gemma-4-12B-it, 1520 training chats, 2 epochs, 2.6 GPU h): 97.5%
 holdout / 96.8% bench test, vs 84.5% / 84.3% zero-shot. ~0.96 h per epoch per 1500 chats.
+Fallback `google/gemma-4-E4B-it` (1 epoch, 0.7 GPU h): 91.75% / 93.0%.
+
+Prediction on both T4s and other competition-day options (2026-10-27):
+```bash
+liars train --config configs/llm_qlora.yaml --set qlora.epochs=1     # no --test: holdout only
+liars predict --run latest:llm_qlora --in <test.jsonl> --gpus 2 --test-preds   # 2 processes, merged
+liars train ... --set train.subsample=4000      # stratified subset of the training folds
+```
+LLM TTA default is 1 (TTA 2 gave no measurable gain); with `augment.tta_n=2` the log shows a
+"TTA check" line (first variant vs mean of variants) on the holdout. Zero-shot runs are also
+reloadable with `liars predict`.
 
 ## Phase 7 — DeBERTa focus-marked multiple choice
 
@@ -263,6 +278,20 @@ liars analyze --run <run> --compare <run2> --n 50
 Bench result: QLoRA + DeBERTa mean = 98.0% holdout (honest) / 97.3% bench test vs QLoRA alone
 97.5% / 96.8%. `--method auto` also considers the best single run and treats accuracy gaps under
 `ensemble.select_tol` (0.3 points) as ties broken by log-loss.
+
+## Competition-day sizing (`liars plan`)
+
+What it does: `src/liars/sizing.py` turns train size, test size and chat length into GPU hours
+per model from speeds measured on a Kaggle T4 (`configs/sizing.yaml`) and applies the runbook
+rules (BUILD_MAP "Launch GPU jobs": TTA 1, both T4s for prediction, 1 epoch, subsample, cut
+max_len, fallback model; DeBERTa and zero-shot only if they fit their caps).
+
+How to run (numbers from `liars stats` -> "total chars" p50 / p90):
+```bash
+liars plan --train 5000 --test 3000 --chars 650 --chars-p90 860
+```
+One-page event checklist: [COMPETITION_CHECKLIST.md](COMPETITION_CHECKLIST.md). Write-up skeleton:
+[METHODOLOGY.md](METHODOLOGY.md). Pinned versions: `requirements-lock.txt`.
 
 ## Phase 9 — Dress rehearsal
 

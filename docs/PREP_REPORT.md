@@ -11,7 +11,8 @@ The detailed handoff log is `PROGRESS.md`; this file is the short, readable vers
   average of the fine-tuned Gemma model (QLoRA) and DeBERTa. The best single model,
   QLoRA on `google/gemma-4-12B-it`, gets 97.5% / 96.8%.
 - No external APIs anywhere. All predictions come from open models run on Kaggle T4s.
-- GPU used this week: **~7.4 h** of the ~30 h weekly quota (account `panavrg`).
+- GPU used this week: **~9.0 h** of the ~30 h weekly quota (account `panavrg`); ~21 h left
+  until the reset on Sat 31 Oct, 00:00 UTC. Confirm on the Kaggle quota bar.
 
 ## Results on the benchmark
 
@@ -25,6 +26,7 @@ style. Holdout = fold 0 = 400 chats, never used for training or tuning. Bench te
 | NLI DeBERTa-large, zero-shot | 71.5% | 73.4% | 0.17 h | No training |
 | Gemma-4-12B, zero-shot | 84.5% | 84.3% | ~0.4 h | Reads the A/B/C/D answer probabilities |
 | DeBERTa-large multiple choice, 5-fold | 92.8% | 95.8% | 2.3 h | 93.7% across all 5 folds |
+| Gemma-4-E4B QLoRA (fallback) | 91.8% | 93.0% | 0.7 h | 1 epoch; 2.4x faster, much weaker |
 | **Gemma-4-12B QLoRA** (main model) | **97.5%** | **96.8%** | 2.6 h | 2 epochs on 1520 chats |
 | Ensemble: QLoRA + DeBERTa (average) | **98.0%** | **97.3%** | – | Best overall |
 | Ensemble: all 5 models (weighted) | 97.5% | 97.1% | – | QLoRA weight 0.94 |
@@ -51,7 +53,27 @@ message and gives the wrong detail later with "it" (see "Findings" below).
 ### Phase 10 detail (pseudo-labelling, bench only)
 
 - 970 of 1000 bench test chats had QLoRA confidence ≥ 0.95. Those labels were 98.0% correct.
-- Holdout effect on DeBERTa: PHASE10_RESULT
+- Holdout effect on DeBERTa (same 400 holdout chats, holdout mode, 2 epochs): **92.75% → 96.5%
+  (+3.75 points)** with the 970 pseudo-labelled chats added to training (20 errors fixed, 5 new).
+  Implicit lies 78% → 100%, two-step 76% → 82%.
+- Caveats: the labels come from QLoRA, a much stronger model, so part of the gain is DeBERTa
+  learning from QLoRA. The first attempt collapsed (stuck at chance); the collapse guard
+  restarted it with a new seed and a lower learning rate, so seed and learning rate also
+  differ from the comparison run. The bench-test score (97.1%) is circular (it trained on
+  those chats) and is not evidence.
+- Pseudo-labelling stays OFF until the organizers confirm it is allowed.
+
+### Final prep round (after Phase 10)
+
+| Added | What it gives you on the day |
+|---|---|
+| `liars plan --train N --test M --chars P50` | GPU hours per model and the exact settings, from measured T4 speeds |
+| `liars predict --gpus 2` | Test prediction split across both T4s (2 processes, merged and checked) |
+| TTA 1 as the LLM default | Halves LLM prediction time; TTA 2 showed no measurable gain |
+| `train.subsample` | Fits big training sets into the 4 h budget |
+| Ambiguity fix in the generator | New synthetic data has no ambiguous "it" lines (13.4% of the old bench had them) |
+| Safer Kaggle runner | Re-uploads code by itself, refuses uncommitted changes, checks datasets are private |
+| `COMPETITION_CHECKLIST.md`, `METHODOLOGY.md`, `requirements-lock.txt` | 3 AM checklist, write-up skeleton, pinned versions |
 
 ## Problems found and fixed along the way
 
@@ -70,17 +92,21 @@ message and gives the wrong detail later with "it" (see "Findings" below).
 
 1. **Fine-tuning is the big win.** Zero-shot Gemma reached 84%. Training on 1520 chats took
    it to 97.5%. With their training data, QLoRA should be the first GPU job.
-2. **Most remaining errors are ambiguous chats, not model mistakes.** In 3 of the 4 two-step
-   errors I read, an honest "it was 12 bucks" came right after someone else's line about a
-   *different* item. A human would read it the same wrong way. On their data, check
-   whether errors are label ambiguity before spending time on them.
+2. **Most remaining errors are ambiguous chats, not model mistakes.** 13.4% of bench chats
+   have an "it" line that can be read as being about a different item. QLoRA scores 98.7% on
+   the clean chats and 84.1% on the ambiguous ones (about 2/3 of its test errors). On their
+   data, check whether errors are label ambiguity before spending time on them.
 3. **Averaging two different models helps a little.** DeBERTa is weaker but makes different
    mistakes; averaging fixed 4 of QLoRA's 10 holdout errors and broke 2.
 4. **Generic rules are weak.** The number and day/time mismatch rules point at the right
    speaker only ~45–54% of the time when they fire. Rules should be written on the day
    against their actual phrasing.
 5. **Timing for sizing runs (T4):** QLoRA Gemma-12B ≈ 1 h per epoch per 1500 chats;
-   DeBERTa-large ≈ 10 min per epoch per 1500 chats (28 min per fold incl. prediction).
+   DeBERTa-large ≈ 10 min per epoch per 1500 chats. Example: train 5k + test 3k ≈ 4.9 GPU h
+   for QLoRA (1 epoch) + zero-shot + DeBERTa. Full table: PROGRESS.md → sizing plan.
+6. **A smaller model is a poor fallback.** Gemma-4-E4B reached only 91.8%; training the 12B on
+   fewer chats is better (it was already at 96–97% after ~1000 chats).
+7. **Pseudo-labels helped DeBERTa a lot** (92.75% → 96.5% holdout), if they are allowed.
 
 ## What still needs you
 

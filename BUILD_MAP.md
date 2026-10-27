@@ -708,16 +708,17 @@ It prints GPU hours per model and the exact `--set` flags, by these rules (measu
 | R1 TTA | always (LLMs) | `augment.tta_n=1` (TTA 2 gave no gain on bench; halves prediction). DeBERTa keeps TTA 2 unless it is over its cap |
 | R2 both T4s | always | train job without `--test`, then `liars predict --run latest:llm_qlora --in <test> --gpus 2 --test-preds` |
 | R3 epochs | QLoRA 2 epochs > 4 h | 1 epoch (bench: inner-val 98.75% after 1 epoch vs 100% best) |
-| R4 subsample | 1 epoch still > 4 h | `train.subsample=K` (stratified, training folds only), K from `liars plan`; only if K >= 3000 |
+| R4 subsample | 1 epoch still > 4 h | `train.subsample=K` (stratified, training folds only), K from `liars plan`; only if K >= 1500 (bench: the 12B hit 96–97.5% inner-val after 736–1104 chats) |
 | R5 max_len | still no fit and p50 > 512 tokens | `llm.max_len=512` + subsample; check the truncation count in the log |
-| R6 fallback model | still no fit | `llm.model_id=google/gemma-4-E4B-it`, 1 epoch (row in PROGRESS sizing plan) |
+| R6 fallback model | still no fit | `llm.model_id=google/gemma-4-E4B-it`, 1 epoch: 2.4x faster but only 91.75% holdout on bench (12B: 97.5%), about DeBERTa level |
 | R7 zero-shot | its estimate <= 1 h | run it FIRST (safety submission ~1 h after launch); else skip and submit the baseline |
 | R8 DeBERTa | holdout mode, 1 fit, 2 epochs <= 1.5 h | run it; else 1 epoch + TTA 1 if <= 1.5 h; else SKIP |
 | R9 truncation | p90 tokens > 1024 | >10% of chats get truncated: expect lower accuracy; ask before going to max_len > 1024 (memory) |
 | R10 nothing fits | rules R3-R6 all fail | STOP and ask (raise the budget up to the 12 h session limit, or rely on DeBERTa / zero-shot) |
 
-Worked example (N 5000, M 3000, ~650 chars): QLoRA 12B 1 epoch 2.8 h + test 0.3 h, zero-shot
-0.5 h, DeBERTa holdout 1.2 h -> ~4.9 GPU h total.
+Worked example (N 5000, M 3000, ~650 chars): QLoRA 12B 2 epochs would be 5.4 h -> 1 epoch: 2.8 h
+training job + 0.25 h test on 2 T4s; zero-shot 0.5 h; DeBERTa holdout 1.2 h (5-fold would be
+5.7 h) -> ~4.9 GPU h total. Full table: PROGRESS.md -> Competition-day sizing plan.
 
 Step 2 (prompt):
 ```

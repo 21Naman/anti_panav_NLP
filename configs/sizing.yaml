@@ -17,10 +17,10 @@ sizing:
       train_s_per_chat: 2.27   # 36.3 s/step / 16 chats (run llm_qlora_1027-002454)
       pred_chats_per_min: 102  # TTA 1 (3680 prompts in 2162 s)
       peak_gib: 8.6
-    qlora_e4b:                 # google/gemma-4-E4B-it fallback. FILLED IN BELOW AFTER THE BENCH RUN
-      train_s_per_chat: null
-      pred_chats_per_min: null
-      peak_gib: null
+    qlora_e4b:                 # google/gemma-4-E4B-it fallback (run llm_qlora_1027-070253, 1 epoch: 91.75% holdout)
+      train_s_per_chat: 0.96   # 15.4 s/step / 16 chats
+      pred_chats_per_min: 240  # TTA 1 (3360 prompts in 841 s)
+      peak_gib: 9.5
     zeroshot_12b:              # google/gemma-4-12B-it zero-shot (run llm_zeroshot_1026-232702)
       pred_chats_per_min: 110  # TTA 1
       calib_chats: 100
@@ -30,7 +30,9 @@ sizing:
 
   rules:
     budget_hours: 4.0          # one QLoRA run must fit (also qlora.max_gpu_hours)
-    min_subsample: 3000        # never train QLoRA on fewer chats than this when subsampling
+    min_subsample: 1500        # never train QLoRA on fewer chats than this when subsampling. Bench: the
+                               # 12B reached 96-97.5% inner-val after 736-1104 chats, better than E4B
+                               # after a full epoch (95%), so a 12B subsample beats the fallback model
     max_len_cap: 1024          # llm.max_len upper bound (T4 memory at micro batch 2)
     deberta_max_hours: 1.5     # run DeBERTa (holdout, 1 fit) only if it fits in this
     zeroshot_max_hours: 1.0    # zero-shot safety submission only if it fits in this

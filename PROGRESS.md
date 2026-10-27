@@ -5,10 +5,11 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 10 — code done; holdout measurement running
-- Last completed phase: 8 (ensemble, error analysis, rules) — done
-- Next step: Phase 10 entry (pseudo-label holdout measurement running on Kaggle:
-  kernel liars-deberta-pseudo). Then STOP: Phase 9 needs the user (separate timed session).
+- Current phase: 9 — NOT STARTED (needs the user: separate sessions, timed)
+- Last completed phase: 10 (pseudo-labelling, switched off) + prep wrap-up (2026-10-27) — done.
+  All prep phases 0–8 and 10 are done; Phase 9 (dress rehearsal) is the only one left.
+- Next step: the user starts Phase 9 in a fresh session (BUILD_MAP "Phase 9"). GPU quota is
+  saved for it (~21 h left this week). Don't start GPU runs before that.
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -49,15 +50,76 @@
 - Hugging Face: NO gated-model licences accepted. Phase 5: prefer non-gated models. If
   a gated model looks clearly better, tell the user which model page to open and
   accept, and wait.
-- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~6.8 h (week of 2026-10-26)
-- GPU hours used in prep (account panavrg): 6.8 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h; Phase 6 QLoRA 2.58 h; Phase 7 DeBERTa 2.32 h + 2 failed starts ~0.1 h)
+- Kaggle GPU: T4 x2 per session (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, peft 0.20.0, accelerate 1.14.0, bitsandbytes 0.50.2, datasets 4.8.5; fp16 only, no bf16; 4-bit NF4 OK). Up to 2 sessions run at once (verified 2026-10-27).
+- Kaggle quota: ~30 h/week (Kaggle docs: "30 hours or sometimes higher"). Resets weekly at the Friday/Saturday boundary, midnight UTC (Kaggle staff + community; not in the official docs) -> next reset Sat 2026-10-31 00:00 UTC. Used this week: ~9.0 h -> ~21 h left. CONFIRM on the Kaggle quota bar (it also shows the time to reset; also shows whether a T4 x2 session counts once, as assumed here).
+- GPU hours used in prep (account panavrg): ~9.0 h (Phase 4 NLI 0.17; Phase 5 ~1.6; Phase 6 QLoRA 2.58; Phase 7 DeBERTa 2.32 + 2 failed starts 0.1; Phase 10 pseudo 0.68 collapsed + 0.78; E4B fallback benchmark 0.71)
+- Models used (Hugging Face id @ revision, all non-gated; revisions = current `main`, last modified before our runs):
+  - google/gemma-4-12B-it @ 707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7 (Apache-2.0) — LLM zero-shot + QLoRA main
+  - google/gemma-4-E4B-it @ ee0ef6023621cff504d758262d4e04895a5af4a2 (Apache-2.0) — QLoRA fallback
+  - MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli @ b3546ea6b0346eb6f8d5d68b13c7dc6d0376b3d7 (MIT) — NLI zero-shot + DeBERTa MC init
+  - Benchmark only: Qwen/Qwen3-14B @ 40c06982, microsoft/phi-4 @ 2db69c1c, Qwen/Qwen3.5-9B @ c2022362, Qwen/Qwen3-8B @ b968826d, Qwen/Qwen3-4B-Instruct-2507 @ cdbee75f
+  - Debug/tests: Qwen/Qwen2.5-0.5B-Instruct @ 7ae55760, cross-encoder/nli-deberta-v3-xsmall @ a1508764, trl-internal-testing/tiny-Qwen2ForCausalLM-2.5 @ ce8d0bf2, hf-internal-testing/tiny-random-LlamaForCausalLM @ 9fb19125
+  - Package versions: requirements-lock.txt (local, installable) + Kaggle runtime in its header; every Kaggle run now writes data/logs/pip_freeze_kaggle.txt.
 - Best result so far: ens_bench_qd = mean(QLoRA, DeBERTa) — 98.0% holdout fold 0 (honest) / 97.3% bench test. Best single: llm_qlora_1027-002454 (Kaggle) — holdout — 97.5% fold 0 / 96.8% bench test — gemma-4-12B-it QLoRA r16, 2 epochs, best step 138/190, TTA 2, T=0.25. (Zero-shot gemma: 84.5% / 84.3%; NLI-large: 71.2% OOF / 73.4% test)
 - Stage-1 / pretrained checkpoints: none yet (stage 1 deferred for QLoRA and DeBERTa).
 - DeBERTa time on T4: DeBERTa-v3-large MC, 1520 chats, ~225 tokens/choice p50 (max_len 512), grad checkpointing, micro 2 x accum 8: 10.4 min/epoch; one fold (2 epochs + evals + TTA-2 predict of 400 + 1000 chats) = 28 min; 5-fold = 2.32 h; 9.8 GiB peak.
 - LLM benchmark winner: google/gemma-4-12B-it (Apache-2.0, not gated) — 82.4% zero-shot on 500 bench chats (no TTA) — 110 chats/min on T4 4-bit (66/min with TTA 2), 10.0 GiB. Fallback: Qwen/Qwen3-14B 69.4% (needs prompt.answer_prefix="Answer:")
+- QLoRA fallback on T4: google/gemma-4-E4B-it (run llm_qlora_1027-070253), 1 epoch on 1520 chats: 0.41 h/epoch (15.4 s/step), predict 240 chats/min TTA 1, 9.5 GiB; 91.75% holdout / 93.0% test (12B 2 ep: 97.5 / 96.8; DeBERTa fold 0: 92.75). 0.71 GPU h.
+- TTA decision (2026-10-27): LLM default tta_n 1 (no measurable gain from 2; see sizing plan). DeBERTa keeps 2.
 - QLoRA time per epoch on T4: google/gemma-4-12B-it — 1520 chats (prompt p50 318 / max 489 tokens) — max_len 1024 — 0.96 h/epoch (36.3 s/step, 16 chats/step). Rule of thumb: ~1600 chats/h at these lengths; time grows ~linearly with prompt length. Whole run (2 epochs + 9 evals + calib + TTA-2 predict of 1400 chats) = 2.58 h. Predict = 51 chats/min with TTA 2. 8.6 GiB peak.
 - Template packs available: default (neutral sentences), alt (casual texting) — src/liars/synth/templates/
 - Benchmark sets: data/bench/{stage1 (15k default mixed, seed 101), train (2k alt med+hard, seed 202, first_names), test (1k alt, seed 303, labels hidden) + test_labels.csv}. Regenerate: README Phase 1.
+
+## Competition-day sizing plan (2026-10-27)
+Tool: `liars plan --train N --test M --chars <p50 total chars> --chars-p90 <p90>` (rules R1–R10 in
+BUILD_MAP "Launch GPU jobs"; speeds in configs/sizing.yaml). Prompt tokens ~ 75 + 0.38 x total chars
+(bench fit). All numbers: Kaggle T4, measured on bench chats (~320 prompt tokens), linear in tokens.
+Model check: predicts the real bench QLoRA run at 2.67 h vs 2.58 h measured.
+
+QLoRA TRAIN hours per epoch (holdout mode trains 76% of N), by mean prompt tokens (~ max_len cap):
+| model | N train | 320 | 512 | 768 | 1024 |
+|---|---|---|---|---|---|
+| gemma-4-12B | 2k | 0.96 | 1.53 | 2.30 | 3.07 |
+| gemma-4-12B | 5k | 2.40 | 3.83 | 5.75 | 7.67 |
+| gemma-4-12B | 10k | 4.79 | 7.67 | 11.5 | 15.3 |
+| gemma-4-12B | 20k | 9.58 | 15.3 | 23.0 | 30.7 |
+| fallback gemma-4-E4B | 2k / 5k / 10k / 20k | 0.41 / 1.01 / 2.03 / 4.05 | 0.65 / 1.62 / 3.24 / 6.49 | 0.97 / 2.43 / 4.86 / 9.73 | 1.30 / 3.24 / 6.49 / 13.0 |
+Add per job: ~0.1 h setup, inner-val evals (4 per epoch over 4% of N), holdout prediction (20% of N).
+
+PREDICTION hours per 1k chats (LLM scoring; DeBERTa is ~10x cheaper):
+| model | TTA, GPUs | 320 | 512 | 768 | 1024 |
+|---|---|---|---|---|---|
+| gemma-4-12B | TTA 1, 1 GPU | 0.16 | 0.26 | 0.39 | 0.52 |
+| gemma-4-12B | TTA 1, 2 GPUs (`--gpus 2`) | 0.08 | 0.13 | 0.20 | 0.26 |
+| gemma-4-12B | TTA 2, 1 GPU (old default) | 0.33 | 0.52 | 0.78 | 1.05 |
+| gemma-4-12B | TTA 2, 2 GPUs | 0.16 | 0.26 | 0.39 | 0.52 |
+| gemma-4-E4B | TTA 1, 1 / 2 GPUs | 0.07 / 0.03 | 0.11 / 0.06 | 0.17 / 0.08 | 0.22 / 0.11 |
+
+TTA 2 vs TTA 1 (QLoRA): not measurable without a new GPU run (only the averaged probabilities were
+saved; the 12B does not fit a laptop). Evidence: QLoRA is near-certain (388/400 holdout predictions
+>= 0.95; only 10 have a top-2 margin < 0.5, so TTA can change at most a handful), no position bias
+(per true label .96–.98), and zero-shot gemma on 108 shared holdout chats: TTA 1 86.1% vs TTA 2
+85.2%. Gain < 0.5 points -> TTA 1 is the competition default (halves LLM prediction). The trainer
+now logs a free "TTA check" (first variant vs mean) whenever tta_n >= 2, to re-check in Phase 9.
+
+Worked example — their train 5k, test 3k, ~650 chars (~322 tokens):
+| job | plan | GPU h |
+|---|---|---|
+| QLoRA 12B | 2 epochs = 5.35 h > 4 h -> 1 epoch: training job (incl. 1000 holdout chats) | 2.81 |
+| QLoRA test prediction | 3000 chats, TTA 1, `--gpus 2` (TTA 2 on 1 GPU would be 0.99) | 0.25 |
+| LLM zero-shot | calib 100 + 1000 holdout + 3000 test (2 GPUs), TTA 1 | 0.50 |
+| DeBERTa-large | holdout mode, 2 epochs, TTA 2 (recommended) | 1.21 |
+| (DeBERTa 5-fold instead) | 2 epochs 5.66 h; 1 epoch 3.48 h — not worth it next to QLoRA | — |
+| **total (recommended)** | | **~4.9** (+20% margin) |
+
+When a QLoRA job will not fit in ~4 h, in this order (= rules R2–R6):
+1. Both T4s for prediction (`liars predict --gpus 2`, done: 2 processes, merged parquet; tested on CPU
+   only — first GPU use in Phase 9). Training itself still uses ONE T4 (DDP not built; ~2x if needed).
+2. 1 epoch instead of 2 (bench: inner-val 98.75% after 1 epoch vs 100% best).
+3. Subsample the training folds (`train.subsample=K`, stratified; K >= 1500).
+4. Cut max_len to 512 (only if p50 > 512 tokens; check the truncation count).
+5. Smaller model gemma-4-E4B (91.75% holdout on bench at 1 epoch — use only as a last resort).
+6. Two parallel sessions (2 jobs at once) save wall-clock, not quota.
 
 ## Organizer answers (2026-10-26, from the SPOC)
 - Dataset size: still being finalised. -> Plan for both small (<5k) and large train sets.
@@ -101,6 +163,12 @@ Answers (date — answer):
 | 2026-10-27 | 7 | DeBERTa real run = large, 5-fold, 2 epochs; stage-1 variant not run | Solo GPU quota (stage 1 on 15k chats ~ +2 h); bench run already gives timing + ensemble partner |
 | 2026-10-27 | 7 | DeBERTa loads fp32 master weights and uses gradient checkpointing by default | transformers 5 kept the fp16 checkpoint dtype (GradScaler crash); large OOMed on T4 at micro batch 2 |
 | 2026-10-27 | 8 | `ensemble auto` also considers the best single run; accuracies within `select_tol` (0.3 pts) tie and the lower log-loss wins | 1–2 rows of a 400-row holdout are noise; never ship worse than the best single run |
+| 2026-10-27 | 10 | DeBERTa collapse guard: val loss ~ ln 4 and acc <= 0.35 after 20% of steps -> restart once (seed+1, lr x 0.67) | DeBERTa-v3-large collapsed to chance on a real run; the guard recovered the rerun |
+| 2026-10-27 | prep | LLM TTA default 1 (QLoRA, zero-shot); DeBERTa keeps 2 | No measurable gain from TTA 2 (zero-shot 86.1% vs 85.2% on 108 shared chats; QLoRA only 10/400 near-ties); halves LLM prediction cost |
+| 2026-10-27 | prep | Test prediction split over both T4s (`liars predict --gpus 2`), train jobs run without `--test` | One session has 2 T4s; we used one |
+| 2026-10-27 | prep | `liars plan` + runbook rules R1–R10 size every GPU job; QLoRA budget 4 h per training job | Solo quota; decisions readable from N, M and chars at 3 AM |
+| 2026-10-27 | prep | Generator re-draws ambiguous "it" chats by default; frozen bench sets NOT regenerated | 13.4% of bench chats are ambiguous; all recorded results refer to the frozen sets and GPU runs cannot be repeated |
+| 2026-10-27 | prep | Kaggle push re-uploads the code snapshot when HEAD changed, refuses uncommitted changes, checks datasets are private | Removes the manual `kaggle_run.py code` step and stale-code runs |
 
 ## Phase log
 Claude appends one entry per phase using this template:
@@ -595,3 +663,70 @@ Claude appends one entry per phase using this template:
   cross-validation so the score is not fitted to itself. A weaker model (DeBERTa) still helps
   when it makes different mistakes: averaging fixed 4 of QLoRA's errors and broke 2.
 - Commit: (see git log, "phase 8: ...")
+
+### Phase 10 — Pseudo-labelling (built, switched OFF)
+- Status: done (code + bench measurement). Stays OFF until the organizers confirm in writing.
+- Date: 2026-10-27
+- Built: `pseudo.py` + `liars pseudo` (top probability >= `pseudo.threshold` 0.95 -> canonical
+  examples, label = argmax, meta.source = "pseudo"; REFUSES unless `pseudo.enabled: true`;
+  `--labels` reports pseudo-label accuracy on bench). `train.extra_train: [files]` adds them to
+  the TRAINING side only (never inner val, never a held-out fold); fold log shows "(+N extra)".
+  DeBERTa collapse guard (found by this phase, see below).
+- Files: src/liars/pseudo.py, configs/pseudo.yaml, src/liars/{trainer,cli}.py, tests/test_pseudo.py.
+- Commands: `liars pseudo --preds data/preds/llm_qlora_1027-002454.parquet --test data/bench/test.jsonl
+  --out data/bench/pseudo_qlora.jsonl --labels data/bench/test_labels.csv --set pseudo.enabled=true`;
+  Kaggle `deberta-pseudo`: `liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl
+  --set deberta.epochs=2 --set train.mode=holdout --set 'train.extra_train=[data/bench/pseudo_qlora.jsonl]'`.
+- Results: 970/1000 bench test chats have QLoRA confidence >= 0.95; pseudo-label accuracy 98.0%.
+  | DeBERTa-large, holdout fold 0 (400) | acc | implicit | two_step |
+  |---|---|---|---|
+  | no pseudo (fold 0 of deberta_mc_1027-032050) | 0.9275 | .776 | .765 |
+  | + 970 pseudo (deberta_mc_1027-065229) | **0.9650** | 1.000 | .824 |
+  20 errors fixed, 5 new. Bench test 0.971 is circular (trained on those chats). 0.78 GPU h.
+- Done-when checks: holdout change recorded (+3.75 points) pass; pseudo-label accuracy reported pass.
+- Decisions & deviations: measured with DeBERTa, not QLoRA (QLoRA holdout ~saturated at 97.5%,
+  ~3.5 GPU h). Labels from QLoRA's holdout-mode run (never saw fold 0) so the holdout stays clean.
+  Confounds: labels from a stronger model (partly distillation); the run used the collapse
+  restart (training seed 43, lr x 0.67) while the baseline used seed 42.
+- Known issues: first attempt (deberta_mc_1027-054303) COLLAPSED (val loss = ln 4, 24% holdout);
+  fixed with the collapse guard (`deberta.collapse_*`: restart once with a new seed and lower lr),
+  which fired and recovered in the second attempt. 0.68 GPU h lost.
+- Explain-it-to-me: when a strong model is very sure about a test chat, we can treat its
+  answer as a label and train on that chat too. The holdout chats are never touched, so the
+  before/after holdout accuracy is honest. It only helps if the confident labels are right
+  (98% here) and it is only allowed if the organizers say so.
+- Commit: (see git log, "phase 10: ...")
+
+### Prep wrap-up — sizing, both T4s, ambiguity fix, competition readiness (2026-10-27)
+- Status: done (user's 7-point list of 2026-10-27; no Phase 9 work)
+- Built:
+  - `liars plan` (src/liars/sizing.py, configs/sizing.yaml): GPU hours per model from N, M and
+    chars; applies rules R1–R10 (BUILD_MAP runbook "Launch GPU jobs"). `train.subsample`
+    (stratified, training folds only). `liars predict --gpus N` (src/liars/multigpu.py: shards,
+    one process per GPU via CUDA_VISIBLE_DEVICES, merge + id check), `--test-preds`,
+    `--run latest:<prefix>`; zero-shot runs now save model_meta.json so they can be reloaded.
+  - TTA: LLM default 1; trainer logs a "TTA check" (first variant vs mean) when tta_n >= 2.
+  - Generator: `synth/ambiguity.py` + verify count; `synth.avoid_ambiguous_anaphors: true`
+    re-draws ambiguous "it" chats (frozen bench needs `=false` to regenerate identically).
+  - Kaggle runner: push re-uploads the code snapshot when HEAD changed and waits for it,
+    refuses uncommitted changes (`--allow-dirty` to override), checks every attached dataset is
+    private; fetch retries 3x (flaky DNS) and warns if the run used another commit;
+    gpu_info.py writes data/logs/pip_freeze_kaggle.txt.
+  - requirements-lock.txt, METHODOLOGY.md (skeleton, TODO (event) markers),
+    COMPETITION_CHECKLIST.md (one page), docs/PREP_REPORT.md (readable summary).
+- Results:
+  - E4B fallback benchmark (0.71 GPU h): 91.75% holdout / 93.0% test, 2.4x faster than 12B.
+  - Ambiguity: frozen bench 13.4% ambiguous (train 268/2000, test 132/1000). QLoRA test: clean
+    98.7% vs ambiguous 84.1% (~2/3 of its test errors); QLoRA+DeBERTa mean: clean 99.2%. New
+    generation: 0 ambiguous, same lie-type mix, leak check TF-IDF 25.45%, no alerts.
+  - `predict --gpus 2` on CPU (debug QLoRA + zero-shot): identical to 1 process (max |diff| 4.5e-6).
+  - Both datasets confirmed private (`isPrivate: true`); kernels pushed with is_private true.
+- Done-when checks (user list): 1 PROGRESS + report filled pass; 2 two-T4 prediction tested in
+  --debug on CPU pass (no GPU run); 3 runbook rules pass; 4 ambiguity flag + avoid pass (bench not
+  regenerated, see decisions); 5 lock + revisions + METHODOLOGY + checklist + auto code refresh +
+  private datasets pass; 6 no new GPU runs pass; 7 pytest pass (see commit).
+- Decisions: see Decisions register rows dated 2026-10-27 "prep".
+- Known issues / TODO for Phase 9: first real use of `predict --gpus 2`, `liars plan`, the auto code
+  refresh and the TTA check; copy pip_freeze_kaggle.txt into requirements-lock.txt; training still
+  uses one T4 per job (DDP not built).
+- Commit: (see git log, "prep: ...")
