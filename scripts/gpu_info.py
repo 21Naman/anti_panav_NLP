@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import importlib
 import platform
+import subprocess
 import sys
+from pathlib import Path
 
 TINY_LM = "hf-internal-testing/tiny-random-LlamaForCausalLM"
 
@@ -21,8 +23,16 @@ def version(mod: str) -> str:
 
 def main() -> None:
     print(f"python {sys.version.split()[0]} on {platform.platform()}")
-    for mod in ("torch", "transformers", "peft", "accelerate", "bitsandbytes", "datasets"):
-        print(f"{mod:<13} {version(mod)}")
+    for mod in ("torch", "transformers", "peft", "accelerate", "bitsandbytes", "datasets",
+                "tokenizers", "huggingface_hub", "sentencepiece", "numpy", "pandas", "pyarrow",
+                "sklearn", "scipy", "yaml", "typer", "tqdm"):
+        print(f"{mod:<15} {version(mod)}")
+    # Full environment for requirements-lock.txt (lands in the run outputs under data/logs/).
+    freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True).stdout
+    out = Path("data/logs/pip_freeze_kaggle.txt")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(f"# python {sys.version.split()[0]} on {platform.platform()}\n" + freeze)
+    print(f"pip freeze ({len(freeze.splitlines())} packages) -> {out}")
     try:
         import torch
     except ImportError:

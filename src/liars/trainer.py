@@ -27,7 +27,7 @@ from liars.models.base import Model
 from liars.paths import get_paths
 from liars.preds import PROB_COLS, accuracy, make_preds, save_preds
 from liars.runlog import log_run
-from liars.schema import Example, load_jsonl
+from liars.schema import SPEAKERS, Example, load_jsonl
 
 DEBUG_SUBDIR = "debug"
 
@@ -79,6 +79,19 @@ def _fit(cfg: dict, train: Sequence[Example], extra: Sequence[Example] = ()) -> 
         tr, va = list(train), None
     model.fit(list(tr) + list(extra), va, cfg)
     return model
+
+
+def tta_check(model, examples: Sequence[Example]) -> str | None:
+    """Held-out accuracy with only the first TTA variant (= tta_n 1) vs the average of all
+    variants, from logits the model already computed (free). None if not applicable."""
+    logits = getattr(model, "_last_tta_logits", None)
+    if logits is None or np.ndim(logits) != 3 or logits.shape[1] < 2 or len(logits) != len(examples):
+        return None
+    y = np.array([SPEAKERS.index(ex.label) for ex in examples])
+    one = float((model._probs(logits[:, :1], model.temperature).argmax(1) == y).mean())
+    avg = float((model._probs(logits, model.temperature).argmax(1) == y).mean())
+    return (f"TTA check ({len(y)} held-out chats): first variant only {one:.4f}, "
+            f"mean of {logits.shape[1]} variants {avg:.4f} (gain {100 * (avg - one):+.2f} points)")
 
 
 def _labels(examples: Sequence[Example]) -> pd.Series:
@@ -153,6 +166,9 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         model = _fit(fold_cfg, tr, extra)
         p = model.predict_proba(va)
         fold_acc[f] = accuracy(p, _labels(va))
+        tta_msg = tta_check(model, va)
+        if tta_msg:
+            log(f"  fold {f}: {tta_msg}")
         p.insert(1, "fold", f)
         p.insert(2, "label", [ex.label for ex in va])
         oof_parts.append(p)
@@ -160,7 +176,8 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
             test_parts.append(model.predict_proba(test))
         if hasattr(model, "report"):  # optional model-specific report (fit + predict stats)
             paths.reports.mkdir(parents=True, exist_ok=True)
-            (paths.reports / f"{run}_fold{f}.md").write_text(model.report(), encoding="utf-8")
+            text = model.report() + (f"\n\n{tta_msg}\n" if tta_msg else "")
+            (paths.reports / f"{run}_fold{f}.md").write_text(text, encoding="utf-8")
         more = f" (+{len(extra)} extra)" if extra else ""
         log(f"  fold {f}: train {len(tr)}{more} held-out {len(va)} acc {fold_acc[f]:.4f} "
             f"({time.time() - tf:.1f}s)")

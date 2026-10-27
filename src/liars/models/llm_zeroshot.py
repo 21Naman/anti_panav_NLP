@@ -91,7 +91,7 @@ class LLMZeroShotModel(Model):
         return softmax(logits.reshape(n * k, s), t).reshape(n, k, s).mean(axis=1)
 
     def predict_proba(self, examples):
-        logits = self._tta_logits(examples)
+        logits = self._last_tta_logits = self._tta_logits(examples)  # for the trainer's TTA check
         return make_preds([ex.id for ex in examples], self._probs(logits, self.temperature))
 
     def report(self) -> str:

@@ -47,7 +47,8 @@ prompt:
   answer_prefix: ""
 
 augment:
-  tta_n: 4               # speaker permutations averaged at inference (1 = off)
+  tta_n: 1               # speaker permutations averaged at inference (1 = off). Competition default 1:
+                         # TTA 2 gave no gain on bench (PROGRESS sizing plan); halves prediction cost
   permute_train: true    # used by trained models (Phase 6/7)
   shuffle_evidence: false
 

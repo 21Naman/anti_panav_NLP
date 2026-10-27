@@ -71,7 +71,8 @@ prompt:
   answer_prefix: ""
 
 augment:
-  tta_n: 4
+  tta_n: 1               # competition default (2026-10-27): TTA 2 showed no gain (PROGRESS sizing plan);
+                         # the trainer logs a free 'TTA check' when tta_n >= 2
   permute_train: true    # decided by the leak check on competition day
   shuffle_evidence: false
 

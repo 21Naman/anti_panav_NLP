@@ -331,7 +331,8 @@ class DebertaMCModel(Model):
         return softmax(logits.reshape(n * k, s), t).reshape(n, k, s).mean(axis=1)
 
     def predict_proba(self, examples):
-        return make_preds([ex.id for ex in examples], self._probs(self._tta_logits(examples), self.temperature))
+        self._last_tta_logits = self._tta_logits(examples)  # for the trainer's TTA check
+        return make_preds([ex.id for ex in examples], self._probs(self._last_tta_logits, self.temperature))
 
     # ------------------------------------------------------------------ io
     def save(self, path: Path) -> None:

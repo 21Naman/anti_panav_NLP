@@ -43,3 +43,24 @@ def test_missing_folds_file_is_explained(tmp_path):
     cfg = _cfg(tmp_path, f"data.train={ROOT / 'tests' / 'fixtures' / 'tiny.jsonl'}")
     with pytest.raises(FileNotFoundError, match="liars folds"):
         run_training(cfg, CONFIG, debug=False, log=lambda *_: None)
+
+
+def test_tta_check_compares_first_variant_with_mean(tiny):
+    import numpy as np
+
+    from liars.models.llm_zeroshot import LLMZeroShotModel
+    from liars.schema import SPEAKERS
+    from liars.trainer import tta_check
+
+    ex = tiny[:4]
+    y = [SPEAKERS.index(e.label) for e in ex]
+    logits = np.zeros((4, 2, 4))
+    for i, k in enumerate(y):
+        logits[i, 1, k] = 5.0            # variant 2 always right
+        logits[i, 0, (k + 1) % 4] = 1.0  # variant 1 always wrong, but weaker
+    m = LLMZeroShotModel()
+    m.temperature, m._last_tta_logits = 1.0, logits
+    msg = tta_check(m, ex)
+    assert "first variant only 0.0000" in msg and "mean of 2 variants 1.0000" in msg
+    m._last_tta_logits = logits[:, :1]
+    assert tta_check(m, ex) is None  # tta_n 1: nothing to compare
