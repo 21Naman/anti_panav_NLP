@@ -36,7 +36,8 @@ TEMPLATE_PATH = ROOT / "notebooks" / "kaggle" / "run_cli.ipynb"
 DEFAULT_DATASETS = ["liars-bench"]
 CODE_DATASET = "liars-code"
 ACCELERATOR = "NvidiaTeslaT4"  # T4 x2
-OUTPUT_ITEMS = ["data/oof", "data/preds", "data/runs.csv", "data/reports", "data/runs", "data/logs"]
+OUTPUT_ITEMS = ["data/oof", "data/preds", "data/runs.csv", "data/reports", "data/runs", "data/logs",
+                "data/models"]
 POLL_SECONDS = 60
 MANIFEST = "manifest.json"
 

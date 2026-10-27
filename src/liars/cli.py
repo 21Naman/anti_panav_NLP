@@ -208,11 +208,41 @@ def submit(
     typer.echo("  predicted label counts: " + "  ".join(f"{k} {v}" for k, v in dist.items()))
 
 
+@app.command()
+def predict(
+    run: str = typer.Option(..., "--run", help="Run name (uses data/runs/<run>.yaml + data/models/<run>/)."),
+    in_path: Path = InPath,
+    model_dir: Path = typer.Option(None, "--model-dir", help="Default: data/models/<run>/full or fold0."),
+    out: Path = typer.Option(None, "--out", help="Default: data/preds/<run>__<input stem>.parquet"),
+    data_dir: Path = typer.Option(Path("data"), "--data-dir", help="Where data/runs/<run>.yaml lives."),
+    set_: list[str] = SetOpt,
+) -> None:
+    """Predict a canonical file with a saved model (e.g. QLoRA adapters)."""
+    import yaml
+
+    from liars.config import apply_overrides
+    from liars.models import get_model_class
+    from liars.paths import get_paths
+    from liars.preds import save_preds
+    from liars.trainer import resolve_model_dir
+
+    paths = get_paths({"paths": {"data_dir": str(data_dir)}})
+    cfg = apply_overrides(yaml.safe_load(open(paths.run_configs / f"{run}.yaml")), set_)
+    cls = get_model_class(cfg["model"]["name"])
+    if not hasattr(cls, "load"):
+        typer.echo(f"model {cfg['model']['name']!r} cannot be reloaded; re-run `liars train` with --test")
+        raise typer.Exit(code=1)
+    mdir = model_dir or resolve_model_dir(get_paths(cfg), run)
+    preds = cls.load(mdir, cfg).predict_proba(load_jsonl(in_path))
+    path = out or get_paths(cfg).preds / f"{run}__{in_path.stem}.parquet"
+    save_preds(preds, path)
+    typer.echo(f"{len(preds)} predictions from {mdir} -> {path}")
+
+
 # Commands that later phases implement. They accept any arguments and exit with
 # code 2 so scripts never mistake a placeholder for a successful run.
 PLACEHOLDERS: dict[str, tuple[int, str]] = {
     "adapt": (9, "Convert raw competition files to canonical JSONL."),
-    "predict": (6, "Predict with a saved model run."),
     "rules": (8, "Compute rule features."),
     "rules-report": (8, "Coverage and precision of each rule."),
     "ensemble": (8, "Combine runs (mean / weighted / stack)."),

@@ -151,7 +151,8 @@ def score_prompts(h: LMHandle, prompts: Sequence[str], batch_size: int,
             chunk = todo[b : b + batch_size]
             enc = h.tokenizer([p for _, p in chunk], add_special_tokens=False, padding=True,
                               return_tensors="pt").to(h.model.device)
-            with torch.inference_mode():
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16,
+                                                         enabled=h.device == "cuda"):
                 try:
                     out = h.model(**enc, logits_to_keep=1)
                 except TypeError:

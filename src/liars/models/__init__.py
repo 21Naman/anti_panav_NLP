@@ -11,11 +11,16 @@ REGISTRY: dict[str, str] = {
     "tfidf_lr": "liars.models.baselines:TfidfLRModel",
     "nli_zeroshot": "liars.models.nli_zeroshot:NLIZeroShotModel",
     "llm_zeroshot": "liars.models.llm_zeroshot:LLMZeroShotModel",
+    "llm_qlora": "liars.models.llm_qlora:LLMQLoRAModel",
 }
 
 
-def get_model(name: str) -> Model:
+def get_model_class(name: str) -> type[Model]:
     if name not in REGISTRY:
         raise ValueError(f"unknown model {name!r}; known: {sorted(REGISTRY)}")
     module, cls = REGISTRY[name].split(":")
-    return getattr(importlib.import_module(module), cls)()
+    return getattr(importlib.import_module(module), cls)
+
+
+def get_model(name: str) -> Model:
+    return get_model_class(name)()

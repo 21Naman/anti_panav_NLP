@@ -1,0 +1,101 @@
+# QLoRA open-LLM classifier (main model). Same prompt as llm_zeroshot.
+#   liars train --config configs/llm_qlora.yaml --test data/bench/test.jsonl     (Kaggle T4)
+#   liars train --config configs/llm_qlora.yaml --debug                          (CPU, 0.5B)
+#   liars predict --run <run> --in data/bench/test.jsonl                         (saved adapters)
+seed: 42
+
+data:
+  train: data/bench/train.jsonl
+  test: data/bench/test.jsonl
+  folds: null
+
+cv:
+  k: 5
+  seed: 42
+  holdout_fold: 0
+
+train:
+  mode: holdout          # fit on folds != holdout_fold, early stopping on an inner split of those
+  refit_full: false      # true: retrain on 100% for best_step steps, use it for test preds
+  inner_val_frac: 0.05
+  init_from_run: null    # run name or adapter dir (stage 1 -> stage 2)
+
+model:
+  name: llm_qlora
+
+llm:
+  model_id: google/gemma-4-12B-it   # Phase 5 winner; fallback Qwen/Qwen3-14B (+ answer_prefix "Answer:")
+  load_in_4bit: true
+  double_quant: true
+  device: auto
+  batch_size: 8          # inference batch (eval / predict)
+  max_len: 1024
+  chat_template_kwargs:
+    enable_thinking: false
+  temperatures: [0.25, 0.5, 1.0, 2.0, 4.0]
+  calib_n: 0             # unused: temperature is fit on the inner validation split
+  fewshot_n: 0
+  progress: false
+
+qlora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  # attention + MLP projections of the language model; vision/audio towers excluded
+  target_regex: '^(?!.*(vision|audio|multi_modal|mm_projector|embed_vision|embed_audio)).*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$'
+  gradient_checkpointing: true
+  upcast_non_quantized: false   # true = peft prepare_model_for_kbit_training (fp32 frozen weights, more memory)
+  optimizer: paged_adamw_8bit   # CUDA; AdamW on CPU
+  lr: 1.0e-4
+  weight_decay: 0.0
+  warmup_ratio: 0.05
+  max_grad_norm: 1.0
+  micro_batch_size: 2
+  grad_accum: 8          # effective batch 16
+  epochs: 2
+  max_steps: null
+  eval_every_frac: 0.25  # evaluate on the inner split 4x per epoch
+  patience: 3            # evals without improvement before stopping
+  time_probe_steps: 20   # steps used to estimate time per epoch
+  max_gpu_hours: 4.0     # refuse to continue if the estimate is above this
+  max_skipped_frac: 0.5  # abort if more probe steps than this were skipped (fp16 overflow)
+
+prompt:
+  system: null
+  intro: "Read the verified evidence and the group chat between speakers A, B, C and D. Exactly one speaker makes a statement that contradicts the evidence."
+  evidence_header: "Evidence:"
+  fact_format: "{i}. {fact}"
+  chat_header: "Chat:"
+  line_format: "{speaker}: {text}"
+  question: "Which speaker (A, B, C or D) makes a statement that contradicts the evidence? Answer with one letter."
+  answer_prefix: ""
+
+augment:
+  tta_n: 4
+  permute_train: true    # decided by the leak check on competition day
+  shuffle_evidence: false
+
+paths:
+  data_dir: data
+
+debug:
+  data:
+    train: tests/fixtures/tiny.jsonl
+    test: tests/fixtures/tiny.jsonl
+  llm:
+    model_id: Qwen/Qwen2.5-0.5B-Instruct
+    load_in_4bit: false
+    device: cpu
+    batch_size: 4
+    max_len: 384
+  qlora:
+    r: 4
+    alpha: 8
+    gradient_checkpointing: false
+    micro_batch_size: 2
+    grad_accum: 2
+    epochs: 1
+    eval_every_frac: 0.5
+    time_probe_steps: 2
+  augment:
+    tta_n: 2

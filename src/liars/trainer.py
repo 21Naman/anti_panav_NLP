@@ -50,10 +50,21 @@ def apply_debug(cfg: dict) -> dict:
     return cfg
 
 
+def resolve_model_dir(paths, run_or_path: str) -> Path:
+    """A saved-model directory from a run name (prefers 'full', then 'fold0') or a path."""
+    p = Path(run_or_path)
+    if p.is_dir():
+        return p
+    for sub in ("full", "fold0"):
+        if (paths.models / run_or_path / sub).is_dir():
+            return paths.models / run_or_path / sub
+    raise FileNotFoundError(f"no saved model for {run_or_path!r} under {paths.models}")
+
+
 def _fit(cfg: dict, train: Sequence[Example]) -> Model:
     seed_everything(cfg["seed"])
     model = get_model(cfg["model"]["name"])
-    if model.uses_val:
+    if model.uses_val and not cfg["train"].get("_refit"):
         tr, va = inner_split(train, cfg["train"]["inner_val_frac"], cfg["seed"])
     else:
         tr, va = list(train), None
@@ -99,6 +110,9 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         run += "_debug"
     log(f"run {run}: model={cfg['model']['name']} mode={mode} train={len(train)} test={len(test)}")
 
+    if cfg["train"].get("init_from_run"):
+        cfg["train"]["_init_from"] = str(resolve_model_dir(paths, cfg["train"]["init_from_run"]))
+        log(f"init from {cfg['train']['_init_from']}")
     fold_ids = sorted(set(folds.values()))
     if mode == "kfold":
         todo = fold_ids
@@ -112,7 +126,9 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         tr = [ex for ex in train if folds[ex.id] != f]
         va = [ex for ex in train if folds[ex.id] == f]
         tf = time.time()
-        model = _fit(cfg, tr)
+        fold_cfg = copy.deepcopy(cfg)
+        fold_cfg["train"]["_save_dir"] = str(paths.models / run / f"fold{f}")
+        model = _fit(fold_cfg, tr)
         p = model.predict_proba(va)
         fold_acc[f] = accuracy(p, _labels(va))
         p.insert(1, "fold", f)
@@ -129,6 +145,7 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
     if mode == "holdout" and cfg["train"].get("refit_full") and test:
         refit_cfg = copy.deepcopy(cfg)
         refit_cfg["train"]["_refit"] = model.refit_info()
+        refit_cfg["train"]["_save_dir"] = str(paths.models / run / "full")
         log("  refit on 100% of train for test predictions")
         test_parts = [_fit(refit_cfg, train).predict_proba(test)]
 
