@@ -249,3 +249,21 @@ liars analyze --run <run> --compare <run2> --n 50
 ## Phase 9 — Dress rehearsal
 
 ## Phase 10 — Pseudo-labelling (only if allowed)
+
+What it does: `pseudo.py` + `liars pseudo` take a prediction file (normally the best
+ensemble's test preds), keep the test chats whose top probability is >= `pseudo.threshold`
+(0.95), and write them as canonical examples with `label` = argmax and
+`meta.source = "pseudo"`. It refuses to run while `pseudo.enabled` is false (the default,
+until the organizers confirm pseudo-labelling is allowed). `train.extra_train: [files]`
+adds such files to the TRAINING side only (never the inner validation split, never a
+held-out fold), so held-out scores stay honest; the fold log shows `(+N extra)`.
+
+How to run (bench, where it is allowed because the data is our own):
+```bash
+liars pseudo --preds data/preds/<run>.parquet --test data/bench/test.jsonl \
+  --out data/bench/pseudo_qlora.jsonl --labels data/bench/test_labels.csv --set pseudo.enabled=true
+liars train --config configs/deberta_mc.yaml --test data/bench/test.jsonl \
+  --set train.mode=holdout --set 'train.extra_train=[data/bench/pseudo_qlora.jsonl]'
+```
+`--labels` (bench only) prints the accuracy of the pseudo-labels. Use the preds of a model
+that never saw the holdout fold (a holdout-mode run), so the holdout comparison stays clean.

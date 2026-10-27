@@ -29,6 +29,7 @@ deberta:
   model_id: MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli   # NLI init (Phase 3)
   device: auto
   fp16: true
+  gradient_checkpointing: true   # needed for large on a T4 (full fine-tune OOMs at micro batch 2); ~30% slower
   max_len: 512
   budget_margin: 8          # token safety margin so the marked speaker's lines are never cut
   special_tokens_budget: 3  # [CLS] a [SEP] b [SEP]

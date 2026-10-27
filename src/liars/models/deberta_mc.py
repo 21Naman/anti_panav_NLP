@@ -76,6 +76,8 @@ class DebertaMCModel(Model):
         model = AutoModelForMultipleChoice.from_pretrained(source, ignore_mismatched_sizes=True,
                                                            dtype=torch.float32)
         model.resize_token_embeddings(len(tok))
+        if d.get("gradient_checkpointing"):  # large on a T4: activations otherwise overflow 15 GB
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         self.device = get_device(d["device"])
         self.tok, self.model = tok, model.to(self.device)
         self.fp16 = bool(d["fp16"]) and self.device == "cuda"
@@ -260,6 +262,8 @@ class DebertaMCModel(Model):
             self.model.load_state_dict(best["state"])
         self.best_step = best["step"] if best["state"] is not None else step
         self.train_minutes = round((time.time() - t0) / 60, 1)
+        self.max_mem_gb = (round(torch.cuda.max_memory_allocated() / 2**30, 2)
+                           if self.device == "cuda" else None)
         self.model.eval()
         self.temperature = refit.get("temperature", 1.0)
         if val:
@@ -314,6 +318,8 @@ class DebertaMCModel(Model):
     def report(self) -> str:
         rows = [("model", self.dcfg["model_id"]), ("best step", self.best_step),
                 ("train minutes", self.train_minutes), ("temperature", self.temperature),
+                ("gradient checkpointing", bool(self.dcfg.get("gradient_checkpointing"))),
+                ("max GPU memory GiB (training)", getattr(self, "max_mem_gb", None)),
                 ("tta_n", self.tta_n), ("choices with dropped lines (all encodes)", self.n_truncated)]
         lines = ["# DeBERTa MC report", "", "| item | value |", "|---|---|"]
         lines += [f"| {k} | {v} |" for k, v in rows]
