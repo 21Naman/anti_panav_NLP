@@ -5,9 +5,9 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 8 — ensemble/report/rules done on bench; entry being written
-- Last completed phase: 7 (DeBERTa-large 5-fold) — done
-- Next step: Phase 8 entry, then Phase 10 (pseudo-label holdout measurement running on Kaggle:
+- Current phase: 10 — code done; holdout measurement running
+- Last completed phase: 8 (ensemble, error analysis, rules) — done
+- Next step: Phase 10 entry (pseudo-label holdout measurement running on Kaggle:
   kernel liars-deberta-pseudo). Then STOP: Phase 9 needs the user (separate timed session).
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
@@ -51,7 +51,7 @@
   accept, and wait.
 - Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~6.8 h (week of 2026-10-26)
 - GPU hours used in prep (account panavrg): 6.8 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h; Phase 6 QLoRA 2.58 h; Phase 7 DeBERTa 2.32 h + 2 failed starts ~0.1 h)
-- Best result so far: llm_qlora_1027-002454 (Kaggle) — holdout — 97.5% fold 0 / 96.8% bench test — gemma-4-12B-it QLoRA r16, 2 epochs, best step 138/190, TTA 2, T=0.25. (Zero-shot gemma: 84.5% / 84.3%; NLI-large: 71.2% OOF / 73.4% test)
+- Best result so far: ens_bench_qd = mean(QLoRA, DeBERTa) — 98.0% holdout fold 0 (honest) / 97.3% bench test. Best single: llm_qlora_1027-002454 (Kaggle) — holdout — 97.5% fold 0 / 96.8% bench test — gemma-4-12B-it QLoRA r16, 2 epochs, best step 138/190, TTA 2, T=0.25. (Zero-shot gemma: 84.5% / 84.3%; NLI-large: 71.2% OOF / 73.4% test)
 - Stage-1 / pretrained checkpoints: none yet (stage 1 deferred for QLoRA and DeBERTa).
 - DeBERTa time on T4: DeBERTa-v3-large MC, 1520 chats, ~225 tokens/choice p50 (max_len 512), grad checkpointing, micro 2 x accum 8: 10.4 min/epoch; one fold (2 epochs + evals + TTA-2 predict of 400 + 1000 chats) = 28 min; 5-fold = 2.32 h; 9.8 GiB peak.
 - LLM benchmark winner: google/gemma-4-12B-it (Apache-2.0, not gated) — 82.4% zero-shot on 500 bench chats (no TTA) — 110 chats/min on T4 4-bit (66/min with TTA 2), 10.0 GiB. Fallback: Qwen/Qwen3-14B 69.4% (needs prompt.answer_prefix="Answer:")
@@ -100,6 +100,7 @@ Answers (date — answer):
 | 2026-10-27 | 6 | Stage-1 QLoRA experiment deferred until after the Phase 7 DeBERTa run, and only if the weekly quota allows | Solo quota; bench holdout is already ~saturated (97.5%), so stage 1 can hardly show a gain here |
 | 2026-10-27 | 7 | DeBERTa real run = large, 5-fold, 2 epochs; stage-1 variant not run | Solo GPU quota (stage 1 on 15k chats ~ +2 h); bench run already gives timing + ensemble partner |
 | 2026-10-27 | 7 | DeBERTa loads fp32 master weights and uses gradient checkpointing by default | transformers 5 kept the fp16 checkpoint dtype (GradScaler crash); large OOMed on T4 at micro batch 2 |
+| 2026-10-27 | 8 | `ensemble auto` also considers the best single run; accuracies within `select_tol` (0.3 pts) tie and the lower log-loss wins | 1–2 rows of a 400-row holdout are noise; never ship worse than the best single run |
 
 ## Phase log
 Claude appends one entry per phase using this template:
@@ -544,3 +545,53 @@ Claude appends one entry per phase using this template:
   at once; the shared softmax forces a comparison ("who is MOST contradicting?"), which
   matches the task's exactly-one-liar structure and keeps the context of the other speakers.
 - Commit: (see git log, "phase 7: ...")
+
+### Phase 8 — Ensemble, error-analysis report, rules framework
+- Status: done
+- Date: 2026-10-27
+- Built: `ensemble.py` (OOF aligned on common ids; mean / weighted (SLSQP on log-loss) /
+  stack (conditional logit on p, log p, rank + rule scores) / single; weighted + stack scored
+  by an inner 5-fold, so honest; auto = best of weighted/mean/single with `select_tol` ties
+  -> lower log-loss, stack only if > `stack_margin` better). `analysis.py` (`liars analyze`:
+  plain HTML, per fold / lie_type / length / true label, confusion, calibration, 50 most
+  confident mistakes red/blue, `--compare` disagreements). `features/rules.py` (Rule +
+  registry, `number_mismatch`, `day_time_mismatch`; `liars rules`, `liars rules-report`).
+- Files: src/liars/{ensemble,analysis}.py, src/liars/features/rules.py, configs/ensemble.yaml,
+  src/liars/cli.py, tests/{test_ensemble,test_rules_analysis}.py.
+- Commands: `liars rules --in data/bench/train.jsonl && liars rules --in data/bench/test.jsonl`;
+  `liars rules-report --in data/bench/train.jsonl`;
+  `liars ensemble --runs baselines_1027-035007 nli_zeroshot_1026-223959 llm_zeroshot_1026-232702 llm_qlora_1027-002454 deberta_mc_1027-032050 --name bench_v3`;
+  `liars ensemble --runs llm_qlora_1027-002454 deberta_mc_1027-032050 --name bench_qd`;
+  `liars analyze --run ens_bench_qd --compare llm_qlora_1027-002454 --n 50 --data data/bench/train.jsonl`.
+- Final bench table (holdout = fold 0, 400 chats, honest; test = 1000 bench test):
+  | run | holdout | log-loss | test |
+  |---|---|---|---|
+  | tfidf (leak detector) | .270 | 1.43 | — |
+  | NLI-large zero-shot | .715 | 1.01 | .734 |
+  | gemma-4-12B zero-shot | .845 | .51 | .843 |
+  | DeBERTa-large MC 5-fold | .928 | .40 | .958 |
+  | gemma-4-12B QLoRA | .975 | .116 | .968 |
+  | ens_bench_v3 (all 5, auto -> weighted; QLoRA .944, DeBERTa .050, NLI .006) | .975 | .084 | .971 |
+  | (v3 stack, not picked: +0.25 pts < 0.3 margin) | .9775 | .081 | — |
+  | **ens_bench_qd (QLoRA + DeBERTa, auto -> mean)** | **.980** | .122 | **.973** |
+  Rules on bench train: day_time_mismatch coverage .354 / precision .542 (day_change .97/.72);
+  number_mismatch .298 / .446 (number_change .92/.58) — generic rules are weak features here.
+- Done-when checks: ensemble honest acc >= best single pass (v3 .975 = .975; qd .980 > .975),
+  weight table shown; HTML reports readable pass: data/reports/ens_bench_qd.html,
+  data/reports/llm_qlora_1027-002454.html, data/reports/deberta_mc_1027-032050.html;
+  rules-report on bench train pass (data/reports/rules_train.md); pytest pass (129).
+- Decisions & deviations: added the `single` candidate + `select_tol` (decisions register).
+  The run subset for bench_qd was chosen after seeing v3 (mild selection; test agrees).
+- Known issues / TODO:
+  - Most remaining QLoRA errors are two_step chats where an honest anaphor ("it was 12 bucks",
+    "belongs to harry") follows ANOTHER speaker's line about a different entity, so the natural
+    reading is a contradiction (3 of 4 two_step mistakes read). In bench train ~86% of
+    anchor->anaphor gaps contain another speaker's entity-bearing line (upper bound on
+    ambiguity). Generator fix (not done; bench frozen): a switch that places each pair so the
+    gap holds only small talk / same-entity lines, then rerun the leak check.
+  - Competition day: check whether errors are label ambiguity before chasing them.
+- Explain-it-to-me: every model is scored on the same untouched holdout chats; the ensemble
+  learns how much to trust each model from those chats, and we measure it with an inner
+  cross-validation so the score is not fitted to itself. A weaker model (DeBERTa) still helps
+  when it makes different mistakes: averaging fixed 4 of QLoRA's errors and broke 2.
+- Commit: (see git log, "phase 8: ...")

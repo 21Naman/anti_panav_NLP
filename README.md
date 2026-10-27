@@ -250,6 +250,10 @@ liars ensemble --runs <run1> <run2> <run3> --name bench --method auto
 liars analyze --run <run> --compare <run2> --n 50
 ```
 
+Bench result: QLoRA + DeBERTa mean = 98.0% holdout (honest) / 97.3% bench test vs QLoRA alone
+97.5% / 96.8%. `--method auto` also considers the best single run and treats accuracy gaps under
+`ensemble.select_tol` (0.3 points) as ties broken by log-loss.
+
 ## Phase 9 — Dress rehearsal
 
 ## Phase 10 — Pseudo-labelling (only if allowed)
