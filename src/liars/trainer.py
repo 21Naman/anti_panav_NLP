@@ -161,7 +161,8 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         if hasattr(model, "report"):  # optional model-specific report (fit + predict stats)
             paths.reports.mkdir(parents=True, exist_ok=True)
             (paths.reports / f"{run}_fold{f}.md").write_text(model.report(), encoding="utf-8")
-        log(f"  fold {f}: train {len(tr)} held-out {len(va)} acc {fold_acc[f]:.4f} "
+        more = f" (+{len(extra)} extra)" if extra else ""
+        log(f"  fold {f}: train {len(tr)}{more} held-out {len(va)} acc {fold_acc[f]:.4f} "
             f"({time.time() - tf:.1f}s)")
 
     if mode == "holdout" and cfg["train"].get("refit_full") and test:
