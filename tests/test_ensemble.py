@@ -6,7 +6,7 @@ from liars.paths import Paths
 from liars.preds import make_preds, save_preds
 from liars.schema import SPEAKERS
 
-CFG = {"seed": 0, "inner_k": 3, "stack_l2": 0.01, "stack_margin": 0.003}
+CFG = {"seed": 0, "inner_k": 3, "stack_l2": 0.01, "stack_margin": 0.003, "select_tol": 0.003}
 
 
 def _write_run(paths, name, ids, labels, quality, rng, test_ids):
@@ -55,3 +55,24 @@ def test_weights_and_stack_shapes():
     assert X.shape == (200, 4, 6)
     p = predict_stack(X, fit_stack(X, y, 0.01))
     assert (p.argmax(1) == y).mean() > 0.95
+
+
+def test_auto_never_below_best_single_by_more_than_tol(tmp_path):
+    rng = np.random.default_rng(3)
+    paths = Paths(tmp_path)
+    ids = [f"x{i}" for i in range(200)]
+    labels = [SPEAKERS[i % 4] for i in range(200)]
+    test_ids = [f"t{i}" for i in range(20)]
+    _write_run(paths, "strong", ids, labels, 0.97, rng, test_ids)
+    _write_run(paths, "noise", ids, labels, 0.0, rng, test_ids)
+    out = run_ensemble(paths, ["strong", "noise"], "auto", "s", CFG, log=lambda *_: None)
+    t = out["table"].set_index("model")["accuracy"]
+    chosen = {"weighted": t["weighted (inner 3-fold)"], "mean": t["mean"], "single": t["strong"],
+              "stack": t["stack (inner 3-fold)"]}[out["method"]]
+    assert out["best_single"] == "strong"
+    assert chosen >= t["strong"] - CFG["select_tol"]
+    single = run_ensemble(paths, ["strong", "noise"], "single", "s1", CFG, log=lambda *_: None)
+    assert single["method"] == "single"
+    a = pd.read_parquet(paths.preds / "ens_s1.parquet").set_index("id")
+    b = pd.read_parquet(paths.preds / "strong.parquet").set_index("id")
+    assert np.allclose(a.loc[b.index].to_numpy(), b.to_numpy())

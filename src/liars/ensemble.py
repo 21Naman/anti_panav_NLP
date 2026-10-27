@@ -6,9 +6,13 @@ holdout fold). Methods:
   weighted - non-negative weights (sum 1) minimising OOF log-loss.
   stack    - conditional logit: per-speaker features (p, log p, rank of each run, rule
              scores) with weights shared across speakers, softmax across the 4.
+  single   - the best single run (by OOF accuracy, then log-loss).
 Weighted and stack are scored with an inner K-fold over the aligned rows (fit on k-1
 parts, predict the rest), so their accuracy is honest. The final weights are fitted on
 all aligned rows and applied to the test predictions.
+auto picks among weighted / mean / single: highest accuracy, but accuracies within
+`select_tol` count as a tie and the lower log-loss wins (one or two rows of a small
+holdout are noise). Stack is picked only if it beats that choice by > `stack_margin`.
 """
 
 from __future__ import annotations
@@ -161,9 +165,10 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
     k, seed, l2 = ecfg["inner_k"], ecfg["seed"], ecfg["stack_l2"]
 
     rows = [(r, _acc(p, y), _nll(p, y)) for r, p in zip(runs, P)]
+    best = max(range(len(runs)), key=lambda i: (_acc(P[i], y), -_nll(P[i], y)))
     mean_p = P.mean(0)
     rows.append(("mean", _acc(mean_p, y), _nll(mean_p, y)))
-    oof = {"mean": mean_p}
+    oof = {"mean": mean_p, "single": P[best]}
     for m in ("weighted", "stack"):
         oof[m] = honest_oof(m, P, y, rules, k, seed, l2)
         rows.append((f"{m} (inner {k}-fold)", _acc(oof[m], y), _nll(oof[m], y)))
@@ -172,11 +177,19 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
 
     weights = fit_weights(P, y)
     log("weights: " + ", ".join(f"{r} {w:.3f}" for r, w in zip(runs, weights)))
-    if method == "auto":  # best of mean / weighted; stack only if clearly better
-        base = max(("weighted", "mean"), key=lambda m: _acc(oof[m], y))
+    log(f"best single run: {runs[best]}")
+    if method == "auto":
+        cands = ("weighted", "mean", "single")
+        top = max(_acc(oof[m], y) for m in cands)
+        tol = ecfg.get("select_tol", 0.0)
+        base = min((m for m in cands if _acc(oof[m], y) >= top - tol - 1e-12), key=lambda m: _nll(oof[m], y))
         method = "stack" if _acc(oof["stack"], y) > _acc(oof[base], y) + ecfg["stack_margin"] else base
-        log(f"auto -> {method} (stack must beat {base} by > {ecfg['stack_margin']:.3f})")
-    out = {"method": method, "table": table, "weights": dict(zip(runs, weights)), "n_aligned": len(ids)}
+        log(f"auto -> {method} (accuracy ties within {tol:.3f} go to the lower log-loss; stack must "
+            f"beat {base} by > {ecfg['stack_margin']:.3f})")
+    if method not in oof:
+        raise ValueError(f"method must be auto, mean, weighted, stack or single, got {method!r}")
+    out = {"method": method, "table": table, "weights": dict(zip(runs, weights)), "n_aligned": len(ids),
+           "best_single": runs[best]}
 
     oof_df = make_preds(ids, oof[method])
     oof_df.insert(1, "fold", folds)
@@ -185,6 +198,8 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
     if test_P is not None:
         if method == "mean":
             tp = test_P.mean(0)
+        elif method == "single":
+            tp = test_P[best]
         elif method == "weighted":
             tp = np.tensordot(weights, test_P, axes=1)
         else:

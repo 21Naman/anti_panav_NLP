@@ -244,7 +244,7 @@ def predict(
 def ensemble(
     ctx: typer.Context,
     runs: list[str] = typer.Option(..., "--runs", help="Run names: --runs r1 r2 r3 (or comma-separated)."),
-    method: str = typer.Option("auto", help="auto | mean | weighted | stack"),
+    method: str = typer.Option("auto", help="auto | mean | weighted | stack | single"),
     name: str = typer.Option(..., "--name"),
     config: Path = typer.Option(Path("configs/ensemble.yaml"), "--config"),
     set_: list[str] = SetOpt,

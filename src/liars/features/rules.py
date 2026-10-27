@@ -204,4 +204,6 @@ def rules_report(examples: Sequence[Example], scores: pd.DataFrame) -> pd.DataFr
     per_type = df.groupby(["rule", "lie_type"])[["fired", "correct"]].apply(agg).reset_index()
     overall = df.groupby("rule")[["fired", "correct"]].apply(agg).reset_index()
     overall.insert(1, "lie_type", "ALL")
-    return pd.concat([overall, per_type], ignore_index=True)
+    out = pd.concat([overall, per_type], ignore_index=True)
+    out["n"] = out["n"].astype(int)
+    return out

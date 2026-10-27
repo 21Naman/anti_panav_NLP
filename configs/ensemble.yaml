@@ -5,7 +5,9 @@ ensemble:
   seed: 42
   inner_k: 5             # inner K-fold over the aligned OOF rows for honest weighted/stack scores
   stack_l2: 0.01
-  stack_margin: 0.003    # auto picks stack only if it beats mean/weighted by > 0.3 points
+  select_tol: 0.003      # auto: weighted / mean / best single within 0.3 points of the top accuracy
+                         # count as tied; the lowest log-loss among them wins
+  stack_margin: 0.003    # auto picks stack only if it beats that choice by > 0.3 points
 
 analysis:
   length_bins: [0, 10, 14, 18, 22, 1000]       # messages per chat
