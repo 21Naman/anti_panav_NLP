@@ -212,7 +212,7 @@ def submit(
 
 @app.command()
 def predict(
-    run: str = typer.Option(..., "--run", help="Run name (uses data/runs/<run>.yaml + data/models/<run>/)."),
+    run: str = typer.Option(..., "--run", help="Run name (uses data/runs/<run>.yaml + data/models/<run>/), or latest:<prefix>."),
     in_path: Path = InPath,
     model_dir: Path = typer.Option(None, "--model-dir", help="Default: data/models/<run>/full or fold0."),
     out: Path = typer.Option(None, "--out", help="Default: data/preds/<run>__<input stem>.parquet"),
@@ -231,7 +231,10 @@ def predict(
     from liars.preds import save_preds
     from liars.trainer import resolve_model_dir
 
+    from liars.trainer import latest_run
+
     paths = get_paths({"paths": {"data_dir": str(data_dir)}})
+    run = latest_run(paths, run)  # 'latest:llm_qlora' -> newest llm_qlora_* run
     cfg = apply_overrides(yaml.safe_load(open(paths.run_configs / f"{run}.yaml")), set_)
     cls = get_model_class(cfg["model"]["name"])
     if not hasattr(cls, "load"):
@@ -366,6 +369,22 @@ def pseudo(
         truth = dict(zip(*load_labels(labels)[["id", "label"]].T.values))
         acc = sum(ex.label == truth.get(ex.id) for ex in chosen) / max(1, len(chosen))
         typer.echo(f"pseudo-label accuracy (bench labels): {acc:.4f}")
+
+
+@app.command()
+def plan(
+    train: int = typer.Option(..., "--train", help="Number of competition TRAIN chats."),
+    test: int = typer.Option(..., "--test", help="Number of TEST chats."),
+    chars: float = typer.Option(..., "--chars", help="p50 of 'total chars' from `liars stats` (evidence + chat)."),
+    chars_p90: float = typer.Option(None, "--chars-p90", help="p90 of 'total chars' (truncation warning)."),
+    config: Path = typer.Option(Path("configs/sizing.yaml"), "--config"),
+    set_: list[str] = SetOpt,
+) -> None:
+    """GPU plan for the day: hours per model and which levers to pull (see BUILD_MAP runbook)."""
+    from liars.sizing import plan as make_plan
+
+    for line in make_plan(train, test, chars, load_config(config, set_)["sizing"], chars_p90):
+        typer.echo(line)
 
 
 # Commands that later phases implement. They accept any arguments and exit with

@@ -18,6 +18,7 @@ train:
   mode: kfold            # cheap thanks to the pair cache: every pair is scored once
   refit_full: false
   inner_val_frac: 0.05
+  subsample: null        # N = train on a label-stratified N-chat subset of the training folds (time budget)
 
 model:
   name: nli_zeroshot

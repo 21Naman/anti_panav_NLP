@@ -69,6 +69,32 @@ def resolve_model_dir(paths, run_or_path: str) -> Path:
     raise FileNotFoundError(f"no saved model for {run_or_path!r} under {paths.models}")
 
 
+def latest_run(paths, run: str) -> str:
+    """'latest:<prefix>' -> newest run name with a saved config (data/runs/<prefix>*.yaml)."""
+    if not run.startswith("latest:"):
+        return run
+    prefix = run.split(":", 1)[1]
+    cands = sorted(paths.run_configs.glob(f"{prefix}*.yaml"), key=lambda p: p.stat().st_mtime)
+    if not cands:
+        raise FileNotFoundError(f"no run config matching {prefix!r}* under {paths.run_configs}")
+    return cands[-1].stem
+
+
+def subsample(train: Sequence[Example], n: int | None, seed: int) -> list[Example]:
+    """Label-stratified random subset of the TRAINING folds (time budget); None = all."""
+    if not n or n >= len(train):
+        return list(train)
+    rng = np.random.default_rng(seed)
+    by_label: dict = {}
+    for ex in train:
+        by_label.setdefault(ex.label, []).append(ex)
+    out = []
+    for lab, exs in sorted(by_label.items(), key=lambda kv: str(kv[0])):
+        k = round(n * len(exs) / len(train))
+        out += [exs[i] for i in sorted(rng.choice(len(exs), size=min(k, len(exs)), replace=False))]
+    return out
+
+
 def _fit(cfg: dict, train: Sequence[Example], extra: Sequence[Example] = ()) -> Model:
     """`extra` (e.g. pseudo-labels) joins the TRAINING side only, never the validation split."""
     seed_everything(cfg["seed"])
@@ -157,7 +183,7 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
 
     oof_parts, test_parts, fold_acc = [], [], {}
     for i, f in enumerate(todo):
-        tr = [ex for ex in train if folds[ex.id] != f]
+        tr = subsample([ex for ex in train if folds[ex.id] != f], cfg["train"].get("subsample"), cfg["seed"])
         va = [ex for ex in train if folds[ex.id] == f]
         tf = time.time()
         fold_cfg = copy.deepcopy(cfg)

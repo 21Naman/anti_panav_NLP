@@ -1,0 +1,40 @@
+# Competition-day sizing (`liars plan --train N --test M --chars P50_TOTAL_CHARS`).
+# Speeds measured on a Kaggle T4 (2026-10-27, bench chats, ~320 prompt tokens). Update after
+# the rehearsal from the run logs ("timing: ... s/step", "chats per minute").
+seed: 0
+
+sizing:
+  tokens_per_char: 0.38        # LLM prompt tokens ~ overhead + 0.38 x (evidence + chat chars), gemma tokenizer
+  token_overhead: 75           #   (fit on bench: p50/p90/p99 = 318/403/450 tokens, predicted 318/403/454)
+  ref_tokens: 320              # speeds below are at this prompt length; time scales ~linearly with tokens
+  holdout_share: 0.20          # holdout mode trains on 80% ...
+  inner_val_share: 0.05        # ... minus a 5% inner validation split
+  evals_per_epoch: 4           # qlora.eval_every_frac 0.25
+  setup_hours: 0.1             # kernel start, pip install, model download + load
+
+  models:
+    qlora_12b:                 # google/gemma-4-12B-it, r16, micro 2 x accum 8, grad checkpointing
+      train_s_per_chat: 2.27   # 36.3 s/step / 16 chats (run llm_qlora_1027-002454)
+      pred_chats_per_min: 102  # TTA 1 (3680 prompts in 2162 s)
+      peak_gib: 8.6
+    qlora_e4b:                 # google/gemma-4-E4B-it fallback. FILLED IN BELOW AFTER THE BENCH RUN
+      train_s_per_chat: null
+      pred_chats_per_min: null
+      peak_gib: null
+    zeroshot_12b:              # google/gemma-4-12B-it zero-shot (run llm_zeroshot_1026-232702)
+      pred_chats_per_min: 110  # TTA 1
+      calib_chats: 100
+    deberta_large:             # DeBERTa-v3-large MC, grad checkpointing, micro 2 x accum 8
+      train_min_per_1k_chats: 6.84     # 10.4 min/epoch for 1520 chats at ~225 tokens/choice
+      pred_chat_variants_per_min: 560  # 4 choices each; TTA 2 = 2 variants per chat
+
+  rules:
+    budget_hours: 4.0          # one QLoRA run must fit (also qlora.max_gpu_hours)
+    min_subsample: 3000        # never train QLoRA on fewer chats than this when subsampling
+    max_len_cap: 1024          # llm.max_len upper bound (T4 memory at micro batch 2)
+    deberta_max_hours: 1.5     # run DeBERTa (holdout, 1 fit) only if it fits in this
+    zeroshot_max_hours: 1.0    # zero-shot safety submission only if it fits in this
+    gpus: 2                    # predict --gpus 2 halves prediction time (both T4s)
+
+paths:
+  data_dir: data

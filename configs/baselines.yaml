@@ -18,6 +18,7 @@ train:
   mode: kfold            # kfold | holdout
   refit_full: false      # holdout only: retrain on 100% for test preds
   inner_val_frac: 0.05   # early-stopping split carved from the training folds
+  subsample: null        # N = train on a label-stratified N-chat subset of the training folds (time budget)
 
 model:
   name: tfidf_lr         # tfidf_lr | majority

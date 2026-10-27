@@ -64,3 +64,29 @@ def test_tta_check_compares_first_variant_with_mean(tiny):
     assert "first variant only 0.0000" in msg and "mean of 2 variants 1.0000" in msg
     m._last_tta_logits = logits[:, :1]
     assert tta_check(m, ex) is None  # tta_n 1: nothing to compare
+
+
+def test_subsample_is_stratified_and_deterministic(tiny):
+    from collections import Counter
+
+    from liars.trainer import subsample
+    a = subsample(tiny, 16, seed=1)
+    assert len(a) == 16 and Counter(e.label for e in a) == Counter({s: 4 for s in "ABCD"})
+    assert [e.id for e in a] == [e.id for e in subsample(tiny, 16, seed=1)]
+    assert subsample(tiny, None, 1) == list(tiny) and subsample(tiny, 999, 1) == list(tiny)
+
+
+def test_latest_run_resolves_newest_config(tmp_path):
+    import os
+    import time
+
+    from liars.paths import Paths
+    from liars.trainer import latest_run
+    paths = Paths(tmp_path)
+    paths.run_configs.mkdir(parents=True)
+    for i, name in enumerate(["llm_qlora_a", "llm_qlora_b", "deberta_mc_c"]):
+        f = paths.run_configs / f"{name}.yaml"
+        f.write_text("x: 1\n")
+        os.utime(f, (time.time() + i, time.time() + i))
+    assert latest_run(paths, "latest:llm_qlora") == "llm_qlora_b"
+    assert latest_run(paths, "plain_name") == "plain_name"

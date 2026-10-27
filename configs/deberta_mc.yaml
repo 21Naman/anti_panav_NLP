@@ -20,6 +20,7 @@ train:
   mode: kfold
   refit_full: false
   inner_val_frac: 0.05
+  subsample: null        # N = train on a label-stratified N-chat subset of the training folds (time budget)
   init_from_run: null
 
 model:
