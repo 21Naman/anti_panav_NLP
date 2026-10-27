@@ -656,10 +656,12 @@ Trust honest held-out accuracy over the public leaderboard. If they disagree by 
 lot, suspect a train/test difference and investigate before submitting more.
 
 ### GPU plan
-Split jobs across team accounts so they run in parallel. Typical split:
-account 1 = QLoRA main run; account 2 = LLM zero-shot + DeBERTa 5-fold;
-account 3 = second QLoRA variant (other seed / permute setting / refit_full);
-account 4 = spare for the improvement loop. Always use "Save Version → Run All".
+(Updated 2026-10-27 for a SOLO team.) One Kaggle account = one weekly quota (~30 h, resets
+Fri/Sat midnight UTC; check the quota bar). Each session has 2x T4. Up to 2 sessions can run
+at once (verified 2026-10-27): they halve wall-clock time but each one uses quota.
+Priority order: (1) QLoRA main run, (2) LLM zero-shot safety submission, (3) DeBERTa.
+Use both T4s inside one session: `liars predict --gpus 2` splits test prediction.
+Size every job with `liars plan` (next sections). Never exceed 4 GPU h per job without asking.
 
 ### T+0:00 — Adapt (target: 45 min)
 ```
@@ -693,18 +695,46 @@ Record the findings in PROGRESS.md. Don't change any code.
 ```
 
 ### T+1:15 — Launch GPU jobs + first submission (target: 30 min)
+Step 1 (you, 1 min): read off train size N, test size M, and "total chars" p50 / p90 from
+`liars stats`, then run:
 ```
-liars folds on competition train (k=5). Give me exact Kaggle commands and expected
-times for:
-(a) llm_zeroshot (benchmark winner) on holdout fold + test;
-(b) llm_qlora holdout mode on competition train, permute_train per forensics,
-    sized to finish within ~4 h on a T4 (use the time-per-epoch in Key facts);
-(c) deberta_mc 5-fold (skip if Phase 7 was debug-only).
+liars plan --train N --test M --chars <p50> --chars-p90 <p90>
+```
+It prints GPU hours per model and the exact `--set` flags, by these rules (measured on a T4,
+`configs/sizing.yaml`; tokens ~ 75 + 0.38 x chars):
+
+| Rule | When | Do |
+|---|---|---|
+| R1 TTA | always (LLMs) | `augment.tta_n=1` (TTA 2 gave no gain on bench; halves prediction). DeBERTa keeps TTA 2 unless it is over its cap |
+| R2 both T4s | always | train job without `--test`, then `liars predict --run latest:llm_qlora --in <test> --gpus 2 --test-preds` |
+| R3 epochs | QLoRA 2 epochs > 4 h | 1 epoch (bench: inner-val 98.75% after 1 epoch vs 100% best) |
+| R4 subsample | 1 epoch still > 4 h | `train.subsample=K` (stratified, training folds only), K from `liars plan`; only if K >= 3000 |
+| R5 max_len | still no fit and p50 > 512 tokens | `llm.max_len=512` + subsample; check the truncation count in the log |
+| R6 fallback model | still no fit | `llm.model_id=google/gemma-4-E4B-it`, 1 epoch (row in PROGRESS sizing plan) |
+| R7 zero-shot | its estimate <= 1 h | run it FIRST (safety submission ~1 h after launch); else skip and submit the baseline |
+| R8 DeBERTa | holdout mode, 1 fit, 2 epochs <= 1.5 h | run it; else 1 epoch + TTA 1 if <= 1.5 h; else SKIP |
+| R9 truncation | p90 tokens > 1024 | >10% of chats get truncated: expect lower accuracy; ask before going to max_len > 1024 (memory) |
+| R10 nothing fits | rules R3-R6 all fail | STOP and ask (raise the budget up to the 12 h session limit, or rely on DeBERTa / zero-shot) |
+
+Worked example (N 5000, M 3000, ~650 chars): QLoRA 12B 1 epoch 2.8 h + test 0.3 h, zero-shot
+0.5 h, DeBERTa holdout 1.2 h -> ~4.9 GPU h total.
+
+Step 2 (prompt):
+```
+liars folds on competition train (k=5). Upload the competition data dataset
+(python scripts/kaggle_run.py data --slug liars-comp ...). Using the `liars plan` output,
+give me the exact Kaggle push commands (with --datasets liars-comp) and expected times for:
+(a) llm_zeroshot (if R7) on holdout fold + test: train job, then predict --gpus 2;
+(b) llm_qlora holdout mode, permute_train per forensics, with the plan's --set flags;
+(c) deberta_mc in holdout mode (if R8).
+Launch (a) and (b) as two parallel sessions, (c) after (a) finishes.
 Meanwhile on CPU: liars train with configs/baselines.yaml, then liars submit on
 the baseline. Show its OOF accuracy and the validated CSV path.
 ```
 Upload the baseline CSV to confirm the format. When (a) finishes, ensemble it
-with NLI if available and submit as the first real milestone.
+with NLI if available and submit as the first real milestone. The Kaggle runner re-uploads
+the code snapshot by itself when HEAD changed, refuses uncommitted changes, and checks that
+every attached dataset is private.
 
 ### While GPUs run — rules from their templates
 ```
