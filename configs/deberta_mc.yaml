@@ -50,6 +50,7 @@ deberta:
   eval_every_frac: 0.5
   patience: 3
   time_probe_steps: 20
+  max_gpu_hours: 4.0         # abort after the time probe if the remaining fits would take longer
   temperatures: [0.25, 0.5, 1.0, 2.0, 4.0]
   save_model: false         # kfold predictions are made in-run; stage 1 saves (see stages)
 

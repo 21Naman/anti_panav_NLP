@@ -143,12 +143,13 @@ def run_training(cfg: dict, config_path: str | Path, test_path: str | Path | Non
         raise ValueError(f"train.mode must be kfold or holdout, got {mode!r}")
 
     oof_parts, test_parts, fold_acc = [], [], {}
-    for f in todo:
+    for i, f in enumerate(todo):
         tr = [ex for ex in train if folds[ex.id] != f]
         va = [ex for ex in train if folds[ex.id] == f]
         tf = time.time()
         fold_cfg = copy.deepcopy(cfg)
         fold_cfg["train"]["_save_dir"] = str(paths.models / run / f"fold{f}")
+        fold_cfg["train"]["_fits_left"] = len(todo) - i + int(mode == "holdout" and bool(cfg["train"].get("refit_full")) and bool(test))
         model = _fit(fold_cfg, tr, extra)
         p = model.predict_proba(va)
         fold_acc[f] = accuracy(p, _labels(va))

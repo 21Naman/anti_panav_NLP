@@ -79,3 +79,21 @@ def test_resolve_latest(tmp_path):
     assert resolve_model_dir(paths, "latest:deberta_mc_s1").parent.name == "deberta_mc_s1_b"
     with pytest.raises(FileNotFoundError):
         resolve_model_dir(paths, "latest:nothing")
+
+
+def test_time_guard_stops_long_runs(tiny):
+    try:
+        from transformers import AutoModelForMultipleChoice  # noqa: F401
+        from transformers import AutoTokenizer
+        AutoTokenizer.from_pretrained(XSMALL)
+    except Exception as e:
+        pytest.skip(f"model unavailable: {e}")
+    cfg = load_config(ROOT / "configs" / "deberta_mc.yaml",
+                      [f"deberta.model_id={XSMALL}", "deberta.device=cpu", "deberta.max_len=128",
+                       "deberta.micro_batch_size=2", "deberta.grad_accum=1", "deberta.time_probe_steps=1",
+                       "deberta.max_gpu_hours=1e-9", "augment.tta_n=1"])
+    cfg["train"]["_fits_left"] = 5
+    m = DebertaMCModel()
+    m.log = lambda *a: None
+    with pytest.raises(RuntimeError, match="max_gpu_hours"):
+        m.fit(tiny[:8], None, cfg)

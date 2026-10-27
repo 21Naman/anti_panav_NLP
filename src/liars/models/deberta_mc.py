@@ -221,8 +221,16 @@ class DebertaMCModel(Model):
                 step += 1
                 if step == d["time_probe_steps"]:
                     sec = (time.time() - t0) / step
+                    fits = cfg["train"].get("_fits_left", 1)
+                    est_run = sec * total_steps * fits / 3600
                     self.log(f"timing: {sec:.2f} s/step -> {sec * steps_per_epoch / 60:.1f} min per "
-                             f"epoch, {sec * total_steps / 60:.1f} min for {total_steps} steps")
+                             f"epoch, {sec * total_steps / 60:.1f} min for {total_steps} steps; "
+                             f"~{est_run:.2f} h for the {fits} fit(s) left (+ eval/predict)")
+                    if est_run > d.get("max_gpu_hours", float("inf")):
+                        raise RuntimeError(
+                            f"estimated {est_run:.1f} GPU h > deberta.max_gpu_hours "
+                            f"{d['max_gpu_hours']}: stopping (use the base model, fewer epochs, or "
+                            "raise the limit)")
                 if val and (step % eval_every == 0 or step == total_steps):
                     acc, vloss = self._eval(val)
                     self.history.append({"step": step, "val_acc": acc, "val_loss": vloss,
