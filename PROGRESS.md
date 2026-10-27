@@ -5,9 +5,10 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 6 — not started
-- Last completed phase: 5 (open-LLM zero-shot + benchmark) — done
-- Next step: start Phase 6 (QLoRA on google/gemma-4-12B-it; fallback Qwen/Qwen3-14B)
+- Current phase: 7 — code + debug done (wip commit 6798b28); GPU run next
+- Last completed phase: 6 (QLoRA gemma-4-12B-it) — done
+- Next step: Phase 7 real run (DeBERTa 5-fold on bench train, Kaggle), then Phase 8 ensemble,
+  Phase 10 entry. Phase 8 and 10 code is already committed as wip (29352e0, c00f4cf).
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
   things that need the user (gated-model licence, a run > 4 GPU hours, anything
@@ -48,12 +49,12 @@
 - Hugging Face: NO gated-model licences accepted. Phase 5: prefer non-gated models. If
   a gated model looks clearly better, tell the user which model page to open and
   accept, and wait.
-- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~1.8 h (week of 2026-10-26)
-- GPU hours used in prep (account panavrg): 1.8 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h)
-- Best result so far: llm_zeroshot_1026-232702 (Kaggle) — holdout — 84.5% fold 0 / 84.3% bench test — gemma-4-12B-it zero-shot, 4-bit, TTA 2, T=2.0. (NLI-large: 71.2% OOF / 73.4% test)
+- Kaggle GPU: T4 x2 (Python 3.13, torch 2.11.0+cu128, transformers 5.16.1, bitsandbytes 0.50.2; fp16 only, no bf16; 4-bit NF4 OK) — weekly quota used so far: ~4.4 h (week of 2026-10-26)
+- GPU hours used in prep (account panavrg): 4.4 h (Phase 4 NLI 0.17 h; Phase 5 benchmark + winner ~1.6 h; Phase 6 QLoRA 2.58 h)
+- Best result so far: llm_qlora_1027-002454 (Kaggle) — holdout — 97.5% fold 0 / 96.8% bench test — gemma-4-12B-it QLoRA r16, 2 epochs, best step 138/190, TTA 2, T=0.25. (Zero-shot gemma: 84.5% / 84.3%; NLI-large: 71.2% OOF / 73.4% test)
 - Stage-1 / pretrained checkpoints: (run name — path / Kaggle dataset name)
 - LLM benchmark winner: google/gemma-4-12B-it (Apache-2.0, not gated) — 82.4% zero-shot on 500 bench chats (no TTA) — 110 chats/min on T4 4-bit (66/min with TTA 2), 10.0 GiB. Fallback: Qwen/Qwen3-14B 69.4% (needs prompt.answer_prefix="Answer:")
-- QLoRA time per epoch on T4: (model id — examples — max_len — hours)
+- QLoRA time per epoch on T4: google/gemma-4-12B-it — 1520 chats (prompt p50 318 / max 489 tokens) — max_len 1024 — 0.96 h/epoch (36.3 s/step, 16 chats/step). Rule of thumb: ~1600 chats/h at these lengths; time grows ~linearly with prompt length. Whole run (2 epochs + 9 evals + calib + TTA-2 predict of 1400 chats) = 2.58 h. Predict = 51 chats/min with TTA 2. 8.6 GiB peak.
 - Template packs available: default (neutral sentences), alt (casual texting) — src/liars/synth/templates/
 - Benchmark sets: data/bench/{stage1 (15k default mixed, seed 101), train (2k alt med+hard, seed 202, first_names), test (1k alt, seed 303, labels hidden) + test_labels.csv}. Regenerate: README Phase 1.
 
@@ -94,6 +95,8 @@ Answers (date — answer):
 | 2026-10-27 | setup | Tokens only via Kaggle Secrets (GH_TOKEN, HF_TOKEN); never in files, never asked for in chat | Security |
 | 2026-10-27 | setup | Phase 5 prefers non-gated HF models; ask the user before relying on a gated one | No gated licences accepted yet |
 | 2026-10-27 | setup | Commit locally only until Phase 4; push to origin from Phase 4 on | Kaggle installs from GitHub starting in Phase 4 |
+| 2026-10-27 | 6 | QLoRA gemma-4-12B-it is the main model (97.5% holdout vs 84.5% zero-shot) | +13 points from 1520 training chats |
+| 2026-10-27 | 6 | Stage-1 QLoRA experiment deferred until after the Phase 7 DeBERTa run, and only if the weekly quota allows | Solo quota; bench holdout is already ~saturated (97.5%), so stage 1 can hardly show a gain here |
 
 ## Phase log
 Claude appends one entry per phase using this template:
@@ -442,3 +445,56 @@ Claude appends one entry per phase using this template:
   average after mapping the letters back. A model that "wants" to start with "The answer
   is…" gives meaningless letter scores, which is why Qwen3 needed an "Answer:" prefix.
 - Commit: (see git log, "phase 5: ...")
+
+### Phase 6 — QLoRA open-LLM classifier (main model)
+- Status: done (stage-1 experiment deferred, see decisions)
+- Date: 2026-10-27
+- Built: `models/llm_qlora.py` -> 4-bit NF4 base + LoRA (r16/a32/d0.05) on q/k/v/o/gate/up/down
+  of the language model only (`qlora.target_regex` skips vision/audio towers); loss = CE over
+  the 4 letter logits at the answer position; fp16 autocast + GradScaler, gradient
+  checkpointing, paged 8-bit AdamW, cosine + warmup, eval every 25% with early stopping on
+  an inner split (never the holdout fold), best LoRA state kept, partial accumulation
+  dropped at epoch end, temperature fit on the inner split with TTA; time probe after 20
+  steps aborts above `max_gpu_hours` (4) or persistent fp16 overflow; saves adapters +
+  model_meta.json; `refit_info`/`refit_full`; `init_from_run` (incl. `latest:<prefix>`).
+  `liars predict --run/--model-dir` scores new files from saved adapters.
+- Files: src/liars/models/llm_qlora.py, configs/llm_qlora.yaml, tests/test_qlora.py,
+  src/liars/{cli,trainer,llm}.py, scripts/kaggle_run.py (data/models in outputs).
+- Commands: `liars train --config configs/llm_qlora.yaml --debug` (CPU, 38 s);
+  Kaggle: `python scripts/kaggle_run.py push --name qlora-gemma4-12b --code dataset --wait
+  --cmd "liars train --config configs/llm_qlora.yaml --test data/bench/test.jsonl --set augment.tta_n=2"`
+  then `python scripts/kaggle_run.py fetch --name qlora-gemma4-12b`.
+- Results (run llm_qlora_1027-002454, holdout fold 0 = 400 chats, train 1520 / inner val 80):
+  | model | holdout | test | day | impl | loc | neg | num | owner | time | 2step | hard | med |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | gemma-4-12B zero-shot (P5) | 0.845 | 0.843 | .86 | .62 | .90 | .93 | .97 | .90 | .94 | .62 | .78 | .91 |
+  | gemma-4-12B QLoRA | **0.975** | **0.968** | 1.00 | .96 | .99 | .99 | 1.00 | 1.00 | .96 | .86 | .96 | .98 |
+  (per-type columns = bench test; holdout two_step .88, implicit .98.) Per true label
+  .96–.97 (no position bias). Val curve: .925 (step 23) -> 1.00 (step 138, best) -> .9875;
+  val loss .31 -> .006. 9 skipped steps, 8 of them in the first 23 (GradScaler settling
+  from 65536), 0 NaN logit rows, 0 truncated prompts. Timing: 0.96 h/epoch, train 122 min,
+  whole kernel 9284 s = 2.58 GPU h; peak 8.6 GiB.
+- Done-when checks: debug < 2 min on CPU pass (38 s); real run 1 + table vs zero-shot pass;
+  "QLoRA time per epoch on T4" filled pass; pytest pass (126 passed, 26 s).
+- Decisions & deviations:
+  - Solo quota: this was job #1 in the priority order (QLoRA -> LLM zero-shot -> DeBERTa).
+  - Run 2 (stage 1 on 5k stage1.jsonl -> stage 2) not run yet: it costs ~3.2 h + 2.6 h and
+    the bench holdout is near ceiling (97.5%), so it can barely show a gain. Revisit after
+    Phase 7 if quota allows (the more useful variant: stage 1 only, scored on bench test
+    = does training on our default pack transfer to the alt pack?).
+  - TTA 2 on Kaggle (config default 4) to save GPU; temperature came out 0.25 (sharpening).
+- Known issues / TODO:
+  - two_step lies (anchor + later anaphor) remain the weakest type (.86 test).
+  - GradScaler starts at 65536 and wastes ~8 optimizer steps (plus their LR schedule
+    steps) while it settles; harmless here, worth a `init_scale` knob if runs get short.
+  - Notebook log prints every line twice (cosmetic).
+  - Val split (80 chats) saturates at 100%; with real data use a bigger inner split
+    (`train.inner_frac`) if early stopping looks noisy.
+- Explain-it-to-me: LoRA freezes the 12B base model and trains small low-rank "patch"
+  matrices (~1% of the size) added to the attention and MLP weights, so it fits on a T4
+  in 4-bit. We still read only the logits of "A"/"B"/"C"/"D" at the answer position, and the
+  loss is plain 4-way cross-entropy on those — the LLM becomes a 4-class classifier that
+  reuses its reading skills. The holdout fold is never used for training, early stopping
+  or temperature, so its accuracy is an honest estimate of unseen data; the ensemble
+  later fits weights on it, which only works if nothing else has touched it.
+- Commit: (see git log, "phase 6: ...")

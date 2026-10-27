@@ -195,6 +195,9 @@ liars train --config configs/llm_qlora.yaml --set data.train=<stage1 file> ...  
 liars train --config configs/llm_qlora.yaml --set train.init_from_run=<stage1 run>
 ```
 
+Bench result (Kaggle T4, gemma-4-12B-it, 1520 training chats, 2 epochs, 2.6 GPU h): 97.5%
+holdout / 96.8% bench test, vs 84.5% / 84.3% zero-shot. ~0.96 h per epoch per 1500 chats.
+
 ## Phase 7 — DeBERTa focus-marked multiple choice
 
 What it does: `models/deberta_mc.py` (AutoModelForMultipleChoice, initialised from the
