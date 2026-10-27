@@ -489,7 +489,7 @@ Claude appends one entry per phase using this template:
     steps) while it settles; harmless here, worth a `init_scale` knob if runs get short.
   - Notebook log prints every line twice (cosmetic).
   - Val split (80 chats) saturates at 100%; with real data use a bigger inner split
-    (`train.inner_frac`) if early stopping looks noisy.
+    (`train.inner_val_frac`, 0.05 now) if early stopping looks noisy.
 - Explain-it-to-me: LoRA freezes the 12B base model and trains small low-rank "patch"
   matrices (~1% of the size) added to the attention and MLP weights, so it fits on a T4
   in 4-bit. We still read only the logits of "A"/"B"/"C"/"D" at the answer position, and the
