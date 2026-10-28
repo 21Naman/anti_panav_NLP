@@ -800,3 +800,15 @@ Claude appends one entry per phase using this template:
   When something breaks it retries in a cheaper way, and if it cannot fix it, it stops and asks.
 - Commit: (user commits; see git log)
 
+
+### First real GPU runs on the new account (2026-10-29, Kaggle `namanbhandari597`)
+- Account switch: Kaggle user is now `namanbhandari597` (OAuth login, `KAGGLE_USERNAME` in ~/.bashrc);
+  laptop is Linux, Python 3.12 venv in `liars-chatroom/.venv`. Datasets `liars-code`, `liars-bench`
+  created (private). Runs use `--code dataset` (loop default `loop.kaggle.code: dataset`).
+- Two failed starts (~0.2 GPU h): notebook had no internet (account not phone-verified) -> pip install
+  failed. Fixed by verifying; the notebook now checks internet first and stops in seconds without it.
+- line_mil v1 (`line_mil_1028-195601`, lr 1.5e-5, 2 epochs): 57.5% held-out, still rising -> under-trained. 38 min.
+- line_mil v2 (`line_mil_1028-205041`, lr 3e-5, 4 epochs): **96.0% held-out (400), 98.0% test (1000)**,
+  lie-line hit rate 97.5%, 67 min, 8.2 GiB. Weakest: two_step 76.5% held-out / 87.8% test. Now the
+  config default; loop branch est 1.2 h, prior high, space context_before / epochs / lr first.
+- Qwen QLoRA bench run (`qwen-bench`) started in parallel; results pending.

@@ -8,11 +8,10 @@
 #   liars train --config configs/line_mil.yaml --stage 2 --test <test.jsonl>   (fine-tune from stage 1)
 #   liars predict --run latest:line_mil --in <test.jsonl> --gpus 2 --test-preds
 # Speed option: --set line_mil.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
-# Cost (estimate from the measured DeBERTa MC speed, not yet timed on a T4): one pass per
-# LINE (~15 x ~175 tokens per chat vs 4 x 225 for DeBERTa MC), so ~3x DeBERTa MC: about
-# 20 min per 1k training chats per epoch for large, ~7 min for base. 5k train chats in
-# holdout mode, 2 epochs: ~2.5 h large, ~1 h base. The time probe logs the real figure
-# after 20 steps and stops the run if it would exceed max_gpu_hours.
+# Cost (timed on a Kaggle T4, 2026-10-29): ~10 s per step of 16 chats = ~10.5 min per 1k
+# training chats per epoch (large). Bench run (1520 train chats, 4 epochs, + 400 held-out +
+# 1000 test predictions): 67 min. The time probe logs the real figure after 20 steps and
+# stops the run if it would exceed max_gpu_hours.
 seed: 42
 
 data:
@@ -57,7 +56,7 @@ line_mil:
   empty_speaker_score: -20.0   # pooled score of a speaker with no lines (never the liar)
   line_loss_weight: 0.0  # > 0 adds line-level BCE on chats with meta.lie_msg_idx (synthetic only)
   lines_per_forward: 32  # line pairs per forward pass (memory knob; gradients still cover the whole batch)
-  lr: 1.5e-5
+  lr: 3.0e-5             # 2026-10-29 bench: 1.5e-5 x 2 epochs = 57.5% (under-trained); 3e-5 x 4 = 96.0% held-out, 98.0% test
   layerwise_lr_decay: 1.0
   weight_decay: 0.01
   warmup_ratio: 0.1
@@ -65,7 +64,7 @@ line_mil:
   micro_batch_size: 1    # chats per micro batch (each chat = all its lines)
   grad_accum: 16
   eval_batch_size: 4     # chats per eval forward (x lines)
-  epochs: 2
+  epochs: 4
   eval_every_frac: 0.5
   patience: 3
   time_probe_steps: 20
