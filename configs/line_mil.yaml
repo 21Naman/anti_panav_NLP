@@ -1,0 +1,115 @@
+# Line-level contradiction checker, trained with multiple-instance learning (MIL).
+# Each chat line (+ a few neighbouring lines as context) is scored against the evidence;
+# line scores are pooled per speaker (soft max) and a softmax over the 4 speakers is
+# trained on the liar label. Also tells you WHICH line it thinks is the lie.
+#   liars train --config configs/line_mil.yaml --debug                         (CPU, xsmall, < 2 min)
+#   liars train --config configs/line_mil.yaml --test <test.jsonl>             (Kaggle T4, holdout)
+#   liars train --config configs/line_mil.yaml --stage 1                       (pretrain on synthetic, line labels)
+#   liars train --config configs/line_mil.yaml --stage 2 --test <test.jsonl>   (fine-tune from stage 1)
+#   liars predict --run latest:line_mil --in <test.jsonl> --gpus 2 --test-preds
+# Speed option: --set line_mil.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli
+# Cost (estimate from the measured DeBERTa MC speed, not yet timed on a T4): one pass per
+# LINE (~15 x ~175 tokens per chat vs 4 x 225 for DeBERTa MC), so ~3x DeBERTa MC: about
+# 20 min per 1k training chats per epoch for large, ~7 min for base. 5k train chats in
+# holdout mode, 2 epochs: ~2.5 h large, ~1 h base. The time probe logs the real figure
+# after 20 steps and stops the run if it would exceed max_gpu_hours.
+seed: 42
+
+data:
+  train: data/bench/train.jsonl
+  test: data/bench/test.jsonl
+  folds: null
+
+cv:
+  k: 5
+  seed: 42
+  holdout_fold: 0
+
+train:
+  mode: holdout          # kfold gives OOF on every row but costs 5 fits; decide with the time probe
+  refit_full: false
+  inner_val_frac: 0.05
+  subsample: null        # N = train on a label-stratified N-chat subset (time budget)
+  init_from_run: null
+
+model:
+  name: line_mil
+
+line_mil:
+  model_id: MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli   # same NLI init as deberta_mc
+  head: contradiction    # contradiction = start from the NLI head's contradiction logit (sane at step 0) | new
+  device: auto
+  fp16: true
+  gradient_checkpointing: true
+  max_len: 256           # evidence + context window + marked line
+  budget_margin: 8
+  special_tokens_budget: 3
+  mark_cost: 4
+  mark_open: "<t>"
+  mark_close: "</t>"
+  evidence_prefix: "Evidence: "
+  line_format: "{speaker}: {text}"
+  question: "Does the marked line contradict the evidence?"
+  context_before: 3      # lines shown before the scored line (two-step "it ..." lies need these)
+  context_after: 1       # lines after (catches "no, it's Tuesday" reactions)
+  pool: logsumexp        # max | mean | logsumexp (soft max: every line gets some gradient)
+  pool_tau: 1.0          # logsumexp temperature; smaller = closer to max
+  empty_speaker_score: -20.0   # pooled score of a speaker with no lines (never the liar)
+  line_loss_weight: 0.0  # > 0 adds line-level BCE on chats with meta.lie_msg_idx (synthetic only)
+  lines_per_forward: 32  # line pairs per forward pass (memory knob; gradients still cover the whole batch)
+  lr: 1.5e-5
+  layerwise_lr_decay: 1.0
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  micro_batch_size: 1    # chats per micro batch (each chat = all its lines)
+  grad_accum: 16
+  eval_batch_size: 4     # chats per eval forward (x lines)
+  epochs: 2
+  eval_every_frac: 0.5
+  patience: 3
+  time_probe_steps: 20
+  max_gpu_hours: 4.0
+  length_probe_n: 200    # chats used for the token-length log line
+  temperatures: [0.25, 0.5, 1.0, 2.0, 4.0]
+  save_model: true       # holdout: keep the model for `liars predict --gpus 2` and stage 2
+                         # (kfold: set false, or 5 x ~1.7 GB of large checkpoints land in outputs.zip)
+
+augment:
+  tta_n: 1               # speaker relabelling barely changes a line-level model; keep 1
+  permute_train: true
+  shuffle_evidence: false
+
+stages:
+  1:                     # pretrain on synthetic chats, where the lie line is known
+    data: {train: data/bench/stage1.jsonl, test: null}
+    cv: {k: 20}          # run `liars folds --in data/bench/stage1.jsonl --k 20`
+    train: {mode: holdout}
+    line_mil: {epochs: 1, line_loss_weight: 0.5}
+  2:
+    train: {mode: holdout, init_from_run: "latest:line_mil_s1"}
+
+paths:
+  data_dir: data
+
+debug:
+  data:
+    train: tests/fixtures/tiny.jsonl
+    test: tests/fixtures/tiny.jsonl
+  cv: {k: 3}
+  train: {mode: holdout}
+  line_mil:
+    model_id: cross-encoder/nli-deberta-v3-xsmall
+    device: cpu
+    gradient_checkpointing: false
+    max_len: 128
+    micro_batch_size: 2
+    grad_accum: 1
+    eval_batch_size: 4
+    epochs: 1
+    eval_every_frac: 0.5
+    time_probe_steps: 2
+    line_loss_weight: 0.5    # tiny.jsonl is synthetic: exercises the line-level loss too
+    save_model: true
+  augment:
+    tta_n: 2                 # exercises TTA + the trainer's TTA check

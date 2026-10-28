@@ -260,7 +260,7 @@ def predict(
 def ensemble(
     ctx: typer.Context,
     runs: list[str] = typer.Option(..., "--runs", help="Run names: --runs r1 r2 r3 (or comma-separated)."),
-    method: str = typer.Option("auto", help="auto | mean | weighted | stack | single"),
+    method: str = typer.Option("auto", help="auto | mean | weighted | stack | single | vote | caruana"),
     name: str = typer.Option(..., "--name"),
     config: Path = typer.Option(Path("configs/ensemble.yaml"), "--config"),
     set_: list[str] = SetOpt,
@@ -385,6 +385,100 @@ def plan(
 
     for line in make_plan(train, test, chars, load_config(config, set_)["sizing"], chars_p90):
         typer.echo(line)
+
+
+loop_app = typer.Typer(help="Self-improving experiment loop: plan -> act -> test -> evaluate -> improve.",
+                       no_args_is_help=True)
+app.add_typer(loop_app, name="loop")
+LoopCfg = typer.Option(Path("configs/loop.yaml"), "--config", exists=True, dir_okay=False)
+
+
+@loop_app.command("run")
+def loop_run(
+    executor: str = typer.Option("dry", help="dry (simulated) | local | kaggle"),
+    iters: int = typer.Option(None, "--iters", help="Iterations this call (default loop.stop.max_iters)."),
+    config: Path = LoopCfg,
+    set_: list[str] = SetOpt,
+) -> None:
+    """Run the loop. State is kept in loop.ledger_dir, so this resumes where it stopped."""
+    from liars.loop.orchestrator import build_loop
+
+    cfg = load_config(config, set_)
+    loop = build_loop(cfg, executor, log=typer.echo)
+    st = loop.run(iters)
+    typer.echo(f"report -> {loop.ledger.root / 'report.md'}")
+    if st.status == "escalated":
+        typer.echo(f"ESCALATED: {st.stop_reason} (see {loop.ledger.root / 'ESCALATE.md'})")
+        raise typer.Exit(code=3)
+
+
+@loop_app.command("status")
+def loop_status(config: Path = LoopCfg, set_: list[str] = SetOpt) -> None:
+    """Print the loop report (champion, budget, experiments)."""
+    cfg = load_config(config, set_)
+    path = Path(cfg["loop"]["ledger_dir"]) / "report.md"
+    typer.echo(path.read_text() if path.exists() else "no report yet: run `liars loop run`")
+
+
+@loop_app.command("resume")
+def loop_resume(config: Path = LoopCfg, set_: list[str] = SetOpt) -> None:
+    """Re-activate a stopped or escalated loop (after a human fixed the cause)."""
+    from liars.loop.ledger import Ledger
+
+    cfg = load_config(config, set_)
+    led = Ledger(cfg["loop"]["ledger_dir"])
+    st = led.load_state()
+    typer.echo(f"was {st.status}: {st.stop_reason or '-'}")
+    st.status, st.stop_reason, st.no_improve_iters = "active", "", 0
+    st.error_counts = {}   # a fixed systemic error must not re-escalate on its next single hit
+    led.save_state(st)
+    esc = led.root / "ESCALATE.md"
+    if esc.exists():
+        esc.rename(led.root / f"ESCALATE_resolved_iter{st.iteration}.md")
+    typer.echo("loop is active again")
+
+
+@loop_app.command("halt")
+def loop_halt(
+    why: str = typer.Option(..., "--why", help="Reason (shown in ESCALATE.md)."),
+    config: Path = LoopCfg,
+    set_: list[str] = SetOpt,
+) -> None:
+    """Stop the loop and escalate to a human (used by the auditor agent on a failed audit)."""
+    from liars.loop.ledger import Ledger
+
+    cfg = load_config(config, set_)
+    led = Ledger(cfg["loop"]["ledger_dir"])
+    st = led.load_state()
+    path = led.escalate(st, why, {"raised by": "liars loop halt", "champion": st.champion})
+    typer.echo(f"loop halted -> {path}")
+
+
+@loop_app.command("doctor")
+def loop_doctor(
+    executor: str = typer.Option("kaggle", help="the executor you plan to use"),
+    config: Path = LoopCfg,
+    set_: list[str] = SetOpt,
+) -> None:
+    """Check the environment, data, folds and every branch definition. Runs nothing."""
+    from liars.loop.orchestrator import build_loop
+    from liars.loop.preflight import environment, summarise_state
+
+    cfg = load_config(config, set_)
+    errors, warnings, info = environment(executor, cfg["loop"]["data_dir"])
+    loop = build_loop(cfg, "dry", log=lambda *a: None)  # dry: builds nothing that needs a GPU
+    errors += loop.preflight()
+    for line in info:
+        typer.echo(f"  ok    {line}")
+    for line in warnings:
+        typer.echo(f"  WARN  {line}")
+    for line in errors:
+        typer.echo(f"  ERROR {line}")
+    typer.echo(summarise_state(cfg["loop"]["ledger_dir"]))
+    typer.echo(f"branches: {', '.join(b for b, v in loop.branches.items() if v.enabled)}")
+    if errors:
+        raise typer.Exit(code=1)
+    typer.echo("ready")
 
 
 # Commands that later phases implement. They accept any arguments and exit with

@@ -1,0 +1,170 @@
+# Self-improving experiment loop (`liars loop ...`). Plan -> act -> test -> evaluate -> improve.
+#   liars loop doctor                                   # environment + config checks, no runs
+#   liars loop run --executor dry --iters 6             # simulated runs: tests the plumbing in seconds
+#   liars loop run --executor kaggle --iters 1          # ONE real iteration on Kaggle GPUs, then stop
+#   liars loop status                                   # champion, budget, last decisions
+#   liars loop resume                                   # after a human fixed an escalation
+# Dataset-agnostic: point loop.data at ANY canonical train/test (+ folds) and it works.
+# Every number below is a guardrail or a decision rule; sources in docs/KNOWLEDGE.md.
+seed: 42
+
+loop:
+  data:
+    train: data/canonical/comp_train.jsonl     # competition day: the adapter's output
+    test: data/canonical/comp_test.jsonl
+    folds: null                                # null = data/canonical/folds_<train stem>.csv
+  data_dir: data                               # where runs write (kaggle executor needs "data")
+  ledger_dir: data/loop                        # state.json, ledger.jsonl, report.md, proposals.yaml
+  predict_test: true                           # every run also predicts the test file (needed to submit)
+  allow_pseudo: false                          # organizers have not allowed pseudo-labels yet
+  allow_labelled_test: false                   # true only for synthetic bench test sets
+  smoke_test: true                             # first run of a branch: `--debug` on CPU before GPU time
+  smoke_timeout_h: 0.25
+  local_counts_gpu: false                      # local executor: count wall time as GPU hours
+
+  budget:
+    gpu_hours: 18.0          # total for the loop (weekly Kaggle quota ~30 h minus margin)
+    per_run_max_h: 4.0       # same cap as the models' own max_gpu_hours
+    margin: 1.2              # a run needs estimate x margin hours left
+    max_concurrent: 2        # Kaggle runs 2 sessions at once
+
+  stop:
+    max_iters: 12
+    patience: 3              # iterations without a promotion
+    target_acc: null         # e.g. 0.99 to stop early
+    holdout_query_budget: 30 # champion comparisons on the same holdout before a human must refresh it
+
+  planner:
+    exploit_top_k: 2         # mutate the best run of the top-2 branches
+    max_baseline_failures: 2 # a branch is dropped after 2 failed baselines (interruptions /
+                             # escalations do not count)
+
+  promotion:                 # evaluate.compare (paired on the same chats)
+    alpha: 0.05              # McNemar significance ...
+    bonferroni: true         # ... divided by the number of candidates in the round
+    min_gain: 0.01           # and at least +1.0 point (Ladder-style step; MDD on 400 chats is ~3 points)
+    tie_tol: 0.003           # |gain| <= 0.3 points counts as a tie ...
+    min_nll_gain: 0.01       # ... and then wins only with log-loss lower by >= 0.01
+    n_boot: 2000
+    min_aligned: 200         # never compare on fewer shared chats
+    by_group: true           # per lie_type accuracy in the ledger when meta.lie_type exists
+
+  sanity:                    # evaluate.sanity: a run failing any of these is rejected
+    min_margin_over_chance: 0.05
+    max_pred_share_excess: 0.25   # predicted-letter share may exceed the largest label share by this much
+    suspicious_acc: 0.995         # warning (and escalation if guardrails.escalate_on_suspicious)
+    suspicious_min_n: 300
+    max_conf_shift: 0.15          # warning: mean confidence held-out vs test (train/test shift)
+    ece_bins: 10
+
+  recovery:                  # recovery.decide
+    max_retries: {transient: 3, oom: 2, time: 2, numeric: 2, unknown: 1, config: 0}
+    backoff_s: 30            # x 2 per attempt
+    systemic_after: 3        # the same error class in 3 different experiments -> escalate
+    numeric_lr_factor: 0.5
+    time_subsample: 3000
+    patterns: null           # null = recovery.DEFAULT_PATTERNS
+
+  guardrails:
+    max_experiments: 60
+    escalate_on_suspicious: true
+    # not allowed: train.refit_full / train.init_from_run (a model trained on the holdout fold
+    # would leak into the held-out score), data.*, paths.*, pseudo-labels
+    allowed_override_prefixes: [qlora., llm., deberta., line_mil., nli., augment., prompt., lr.,
+                                train.mode, train.subsample, cv.holdout_fold, seed]
+    forbidden: {}            # e.g. {augment.permute_train: "false"} after a leak check says so
+
+  recombine:
+    enabled: true
+    methods: [vote, caruana, weighted]   # evaluated like any candidate; can become champion
+    min_members: 2
+    max_members: 5
+    ensemble_config: configs/ensemble.yaml
+
+  kaggle:
+    datasets: [liars-comp]   # private data dataset holding data.train/test/folds
+    poll_s: 60
+
+  dry:                       # simulated quality per branch (dry executor only)
+    base_quality: {tfidf: 0.30, nli_zs: 0.55, llm_zs: 0.70, deberta: 0.80, line_mil: 0.78,
+                   qlora_gemma: 0.88, qlora_qwen: 0.86}
+
+# Knob names per model family: recovery uses them to make a failing run cheaper / stabler.
+families:
+  qlora: {micro_batch: qlora.micro_batch_size, grad_accum: qlora.grad_accum, epochs: qlora.epochs, lr: qlora.lr}
+  deberta: {micro_batch: deberta.micro_batch_size, grad_accum: deberta.grad_accum, epochs: deberta.epochs, lr: deberta.lr}
+  line_mil: {micro_batch: line_mil.micro_batch_size, grad_accum: line_mil.grad_accum, epochs: line_mil.epochs, lr: line_mil.lr}
+  zeroshot: {}
+  cheap: {}
+
+# Branches: candidate methods run in parallel, recombined by recombine.methods.
+# space: knob -> ordered values; the FIRST value must equal the config's value (the baseline);
+# the planner moves one knob at a time to a neighbouring value of the branch's best run.
+# prior: from docs/KNOWLEDGE.md (high = run first).
+branches:
+  qlora_gemma:
+    family: qlora
+    config: configs/llm_qlora.yaml
+    est_gpu_h: 2.6           # Phase 6: 2.58 h incl. test prediction (1520 train chats, 2 epochs)
+    prior: high
+    hypothesis: "main model: QLoRA gemma-4-12B letter logits (97.5% on the bench)"
+    space:
+      qlora.lr: [1.0e-4, 5.0e-5, 2.0e-4]
+      qlora.r: [16, 32, 64]                  # WSDM/LMSYS teams used r32-64 on all linear layers
+      qlora.epochs: [2, 1]
+      augment.tta_n: [1, 2]                  # swap TTA: +~0.003 log-loss in LMSYS 1st place
+    sources: [K-LLM-14, K-LLM-10]
+  qlora_qwen:
+    family: qlora
+    config: configs/llm_qlora_qwen.yaml
+    est_gpu_h: 3.0           # estimate: 14B ~15% slower than 12B
+    prior: high
+    hypothesis: "second LLM family for ensemble diversity (Qwen 14B dominated WSDM top places)"
+    space:
+      qlora.lr: [1.0e-4, 5.0e-5]
+      qlora.r: [16, 32]
+    sources: [K-LLM-13, K-LLM-9]
+  deberta:
+    family: deberta
+    config: configs/deberta_mc.yaml
+    base: [train.mode=holdout, deberta.save_model=true]
+    est_gpu_h: 1.0           # sizing: holdout, 1 fit, 3 epochs ~ 1 h on 1.5k chats
+    prior: med
+    hypothesis: "DeBERTa-v3-large MC: different architecture, cheap, strong ensemble partner"
+    space:
+      deberta.lr: [1.5e-5, 1.0e-5, 2.0e-5]
+      deberta.layerwise_lr_decay: [1.0, 0.9]
+      augment.tta_n: [2, 4]
+    sources: [K-VER-1]
+  line_mil:
+    family: line_mil
+    config: configs/line_mil.yaml
+    est_gpu_h: 1.5           # estimate (not timed): ~3x DeBERTa MC per chat
+    prior: med
+    hypothesis: "line-level MIL checker: structured utterance view generalises better out of distribution (DECODE)"
+    space:
+      line_mil.pool: [logsumexp, max, mean]
+      line_mil.pool_tau: [1.0, 0.5, 2.0]
+      line_mil.context_before: [3, 1, 5]
+    sources: [K-VER-1, K-VER-2, K-VER-14]
+  llm_zs:
+    family: zeroshot
+    config: configs/llm_zeroshot.yaml
+    base: [llm.model_id=google/gemma-4-12B-it]
+    est_gpu_h: 0.5
+    prior: low
+    hypothesis: "zero-shot LLM: no training, a different error profile for the vote"
+    space:
+      augment.tta_n: [1, 2]
+  nli_zs:
+    family: zeroshot
+    config: configs/nli_zeroshot.yaml
+    est_gpu_h: 0.2
+    prior: low
+    hypothesis: "zero-shot NLI per line (73% on the bench): cheap diversity"
+  tfidf:
+    family: cheap
+    config: configs/baselines.yaml
+    est_gpu_h: 0.0
+    prior: low
+    hypothesis: "TF-IDF baseline: a floor; anything near it is broken, anything far above it on text alone is a leak"

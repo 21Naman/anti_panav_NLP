@@ -7,10 +7,12 @@ holdout fold). Methods:
   stack    - conditional logit: per-speaker features (p, log p, rank of each run, rule
              scores) with weights shared across speakers, softmax across the 4.
   single   - the best single run (by OOF accuracy, then log-loss).
+  vote     - majority vote of the runs' top letters (ties: higher mean prob). Nothing fitted.
+  caruana  - greedy ensemble selection with replacement on log-loss (Caruana et al. 2004).
 Weighted and stack are scored with an inner K-fold over the aligned rows (fit on k-1
 parts, predict the rest), so their accuracy is honest. The final weights are fitted on
 all aligned rows and applied to the test predictions.
-auto picks among weighted / mean / single: highest accuracy, but accuracies within
+auto picks among `auto_candidates` (default weighted / mean / single): highest accuracy, but accuracies within
 `select_tol` count as a tie and the lower log-loss wins (one or two rows of a small
 holdout are noise). Stack is picked only if it beats that choice by > `stack_margin`.
 """
@@ -138,13 +140,48 @@ def predict_stack(X: np.ndarray, model) -> np.ndarray:
     return e / e.sum(1, keepdims=True)
 
 
-def honest_oof(method: str, P, y, rules, k: int, seed: int, l2: float) -> np.ndarray:
+def vote(P: np.ndarray) -> np.ndarray:
+    """Majority vote of the runs' top letters; ties go to the higher mean probability.
+    Returned as probabilities whose argmax is the vote winner (vote share + a small share
+    of the mean probabilities). Nothing is fitted. Badly calibrated by design: use it for
+    accuracy, not log-loss."""
+    r = P.shape[0]
+    counts = np.zeros(P.shape[1:])
+    top = P.argmax(2)  # (runs, n)
+    for k in range(r):
+        counts[np.arange(P.shape[1]), top[k]] += 1
+    p = counts / r + 1e-3 * P.mean(0)
+    return p / p.sum(1, keepdims=True)
+
+
+def caruana_weights(P: np.ndarray, y: np.ndarray, n_iter: int, init_k: int) -> np.ndarray:
+    """Caruana et al. (2004) ensemble selection: start from the init_k best runs, then
+    greedily add (with replacement) the run that most lowers log-loss, n_iter times.
+    Returns weights = selection counts / total."""
+    r = P.shape[0]
+    order = sorted(range(r), key=lambda i: _nll(P[i], y))
+    counts = np.zeros(r)
+    for i in order[: max(1, min(init_k, r))]:
+        counts[i] += 1
+    for _ in range(n_iter):
+        cur = np.tensordot(counts, P, axes=1)
+        tot = counts.sum()
+        best = min(range(r), key=lambda i: _nll((cur + P[i]) / (tot + 1), y))
+        counts[best] += 1
+    return counts / counts.sum()
+
+
+def honest_oof(method: str, P, y, rules, k: int, seed: int, l2: float, ecfg: dict | None = None) -> np.ndarray:
     """Out-of-fold ensemble probabilities over the aligned rows (inner K-fold)."""
+    ecfg = ecfg or {}
     out = np.zeros(P.shape[1:])
     skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=seed)
     for tr, te in skf.split(np.zeros(len(y)), y):
         if method == "weighted":
             out[te] = np.tensordot(fit_weights(P[:, tr], y[tr]), P[:, te], axes=1)
+        elif method == "caruana":
+            w = caruana_weights(P[:, tr], y[tr], ecfg.get("caruana_iters", 20), ecfg.get("caruana_init", 1))
+            out[te] = np.tensordot(w, P[:, te], axes=1)
         else:
             X = stack_features(P, rules)
             out[te] = predict_stack(X[te], fit_stack(X[tr], y[tr], l2))
@@ -169,9 +206,21 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
     mean_p = P.mean(0)
     rows.append(("mean", _acc(mean_p, y), _nll(mean_p, y)))
     oof = {"mean": mean_p, "single": P[best]}
-    for m in ("weighted", "stack"):
-        oof[m] = honest_oof(m, P, y, rules, k, seed, l2)
-        rows.append((f"{m} (inner {k}-fold)", _acc(oof[m], y), _nll(oof[m], y)))
+    auto_c = tuple(ecfg.get("auto_candidates", ("weighted", "mean", "single")))
+    # compute only what is needed: one failing method must not take the others down
+    need = set(auto_c) | {"stack"} if method == "auto" else {method}
+    if ecfg.get("report_all", True) and method == "auto":
+        need |= {"weighted", "stack"}
+    if len(runs) >= 2 and ("vote" in need or method == "auto"):
+        oof["vote"] = vote(P)
+        rows.append(("vote (majority)", _acc(oof["vote"], y), _nll(oof["vote"], y)))
+    k_eff = max(2, min(k, int(np.bincount(y, minlength=len(SPEAKERS)).min() or 2)))
+    if k_eff != k:
+        log(f"inner k-fold reduced to {k_eff} (smallest label class has fewer than {k} rows)")
+    for m in ("weighted", "caruana", "stack"):
+        if m in need:
+            oof[m] = honest_oof(m, P, y, rules, k_eff, seed, l2, ecfg)
+            rows.append((f"{m} (inner {k_eff}-fold)", _acc(oof[m], y), _nll(oof[m], y)))
     table = pd.DataFrame(rows, columns=["model", "accuracy", "log_loss"])
     log(table.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
@@ -179,15 +228,15 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
     log("weights: " + ", ".join(f"{r} {w:.3f}" for r, w in zip(runs, weights)))
     log(f"best single run: {runs[best]}")
     if method == "auto":
-        cands = ("weighted", "mean", "single")
+        cands = tuple(m for m in auto_c if m in oof)
         top = max(_acc(oof[m], y) for m in cands)
         tol = ecfg.get("select_tol", 0.0)
         base = min((m for m in cands if _acc(oof[m], y) >= top - tol - 1e-12), key=lambda m: _nll(oof[m], y))
-        method = "stack" if _acc(oof["stack"], y) > _acc(oof[base], y) + ecfg["stack_margin"] else base
+        method = "stack" if "stack" in oof and _acc(oof["stack"], y) > _acc(oof[base], y) + ecfg["stack_margin"] else base
         log(f"auto -> {method} (accuracy ties within {tol:.3f} go to the lower log-loss; stack must "
             f"beat {base} by > {ecfg['stack_margin']:.3f})")
     if method not in oof:
-        raise ValueError(f"method must be auto, mean, weighted, stack or single, got {method!r}")
+        raise ValueError(f"method must be auto, mean, weighted, stack, single, vote or caruana, got {method!r}")
     out = {"method": method, "table": table, "weights": dict(zip(runs, weights)), "n_aligned": len(ids),
            "best_single": runs[best]}
 
@@ -202,6 +251,12 @@ def run_ensemble(paths: Paths, runs: Sequence[str], method: str, name: str, ecfg
             tp = test_P[best]
         elif method == "weighted":
             tp = np.tensordot(weights, test_P, axes=1)
+        elif method == "vote":
+            tp = vote(test_P)
+        elif method == "caruana":
+            cw = caruana_weights(P, y, ecfg.get("caruana_iters", 20), ecfg.get("caruana_init", 1))
+            log("caruana weights: " + ", ".join(f"{r} {w:.3f}" for r, w in zip(runs, cw)))
+            tp = np.tensordot(cw, test_P, axes=1)
         else:
             model = fit_stack(stack_features(P, rules), y, l2)
             tp = predict_stack(stack_features(test_P, test_rules if rules is not None else None), model)

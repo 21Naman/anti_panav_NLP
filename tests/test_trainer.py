@@ -40,7 +40,8 @@ def test_debug_run(tmp_path, mode):
 
 
 def test_missing_folds_file_is_explained(tmp_path):
-    cfg = _cfg(tmp_path, f"data.train={ROOT / 'tests' / 'fixtures' / 'tiny.jsonl'}")
+    # data.test=null: the test must not depend on generated data under data/ (fresh checkout)
+    cfg = _cfg(tmp_path, f"data.train={ROOT / 'tests' / 'fixtures' / 'tiny.jsonl'}", "data.test=null")
     with pytest.raises(FileNotFoundError, match="liars folds"):
         run_training(cfg, CONFIG, debug=False, log=lambda *_: None)
 

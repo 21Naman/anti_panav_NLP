@@ -13,6 +13,7 @@ REGISTRY: dict[str, str] = {
     "llm_zeroshot": "liars.models.llm_zeroshot:LLMZeroShotModel",
     "llm_qlora": "liars.models.llm_qlora:LLMQLoRAModel",
     "deberta_mc": "liars.models.deberta_mc:DebertaMCModel",
+    "line_mil": "liars.models.line_mil:LineMILModel",
 }
 
 

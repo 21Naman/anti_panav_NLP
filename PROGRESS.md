@@ -169,6 +169,10 @@ Answers (date — answer):
 | 2026-10-27 | prep | `liars plan` + runbook rules R1–R10 size every GPU job; QLoRA budget 4 h per training job | Solo quota; decisions readable from N, M and chars at 3 AM |
 | 2026-10-27 | prep | Generator re-draws ambiguous "it" chats by default; frozen bench sets NOT regenerated | 13.4% of bench chats are ambiguous; all recorded results refer to the frozen sets and GPU runs cannot be repeated |
 | 2026-10-27 | prep | Kaggle push re-uploads the code snapshot when HEAD changed, refuses uncommitted changes, checks datasets are private | Removes the manual `kaggle_run.py code` step and stale-code runs |
+| 2026-10-27 | prep+ | Added `line_mil` (line-level MIL checker) as an optional 3rd ensemble member, after the 3 main runs | Different error profile from whole-chat models (per-line view, says which line lies); research (MiniCheck, SummaC, DECODE, CDConv) favours fine-grained checking |
+| 2026-10-27 | prep+ | Added `llm_qlora_qwen.yaml` (Qwen3-14B, answer_prefix "Answer:", micro batch 1 x 16) as a second LLM family | Ensemble diversity; Qwen bases won Eedi; 14B is ~1 GiB bigger than gemma-12B on a 15 GiB T4 |
+| 2026-10-27 | prep+ | Built the improvement loop (`src/liars/loop/`, `liars loop`, 3 agents, `/improve-loop`); promotion = McNemar + >= 1 point, Bonferroni per round | User asked for a plan->act->test->evaluate->improve agent with branching, recombination, guardrails and recovery; rules from the research in docs/KNOWLEDGE.md |
+| 2026-10-27 | prep+ | Ensemble gained `vote` and `caruana` methods; `auto` keeps its old candidates unless `auto_candidates` lists them | Recombination by majority vote was asked for; old ensemble results stay reproducible |
 
 ## Phase log
 Claude appends one entry per phase using this template:
@@ -730,3 +734,69 @@ Claude appends one entry per phase using this template:
   refresh and the TTA check; copy pip_freeze_kaggle.txt into requirements-lock.txt; training still
   uses one T4 per job (DDP not built).
 - Commit: (see git log, "prep: ...")
+
+### Prep extra — line-level MIL model + Qwen QLoRA config (2026-10-27)
+- Status: built, NOT yet run (no torch in the session that wrote it; no GPU run)
+- Built:
+  - `src/liars/models/line_mil.py` (`model.name: line_mil`): scores every chat line (+3 lines
+    before, 1 after, scored line in <t>...</t>) against the evidence with an NLI DeBERTa
+    cross-encoder; score = contradiction log-odds (starts from the NLI head, `head: contradiction`).
+    Per speaker: soft max (tau*logsumexp) over their lines; softmax over A-D; CE on the liar label
+    (MIL: no line labels needed). Optional line BCE on chats with meta.lie_msg_idx
+    (`line_loss_weight`, stage 1 on synthetic = 0.5). Early stopping, temperature, time probe /
+    max_gpu_hours, save/load (so `liars predict --gpus 2` works), `line_scores()` (which line is the
+    lie) and `line_hit_rate()` in the fold report.
+  - `configs/line_mil.yaml` (holdout default, stages 1/2, debug block with xsmall on CPU).
+  - `configs/llm_qlora_qwen.yaml`: llm_qlora with Qwen/Qwen3-14B, answer_prefix "Answer:",
+    micro batch 1 x accum 16 (same effective batch 16).
+  - Tests: `tests/test_line_mil.py` (6 pure tests passed in the writing session; 4 torch tests need
+    the cached xsmall model), `tests/test_qwen_config.py` (passed).
+- Commands:
+  - `pytest -q tests/test_line_mil.py tests/test_qwen_config.py` then `pytest -q`
+  - `liars train --config configs/line_mil.yaml --debug` (CPU, < 2 min expected)
+  - Kaggle: `python scripts/kaggle_run.py push --name line-mil --datasets liars-comp --cmd "liars train --config configs/line_mil.yaml --test <test>"`
+- Cost estimate (from DeBERTa MC's measured 6.84 min/1k chats at 4x225 tokens): ~3x DeBERTa MC,
+  ~20 min per 1k chats per epoch (large), ~7 min (base). Not timed yet.
+- Known issues / TODO: first torch run is on the user's laptop (`--debug`); not in `liars plan`
+  sizing; priority stays QLoRA -> zero-shot -> DeBERTa -> line_mil / Qwen only if quota allows.
+- Explain-it-to-me: instead of asking "who is the liar?" about the whole chat, the model asks
+  "does this one line contradict the evidence?" for every line, then the speaker whose worst line
+  looks most contradictory is the liar. It learns this from the liar label alone.
+- Commit: (user commits; see git log)
+
+### Prep extra — improvement loop (2026-10-27)
+- Status: built; dry-run tested end to end in the writing session; no real (GPU) loop run yet
+- Built:
+  - `src/liars/loop/`: ledger (state.json + append-only ledger.jsonl, resumable), catalog
+    (branches + search spaces; checks knobs exist and the first value = config default),
+    planner (proposals -> baselines -> one-knob mutations of the top-2 branches -> recombination),
+    guardrails (budget x 1.2, per-run cap, allowed override prefixes, no data./paths./pseudo,
+    no duplicates, unlabelled test), executor (local / kaggle via kaggle_run.py / dry simulation
+    with failure injection), recovery (error classes -> retry / mutate / fail / escalate; systemic
+    after 3 experiments), evaluate (sanity tests, acc/nll/brier/ece/by lie type, McNemar +
+    bootstrap, min detectable gain), orchestrator (the cycle + report.md), preflight (doctor).
+  - `ensemble.py`: `vote`, `caruana` methods (inner-CV scored like weighted).
+  - CLI: `liars loop run|status|resume|halt|doctor`.
+  - Agents: sources in `agents/agents/` (loop-planner, loop-auditor, loop-researcher) and
+    `agents/commands/improve-loop.md`; `bash scripts/install_agents.sh` copies them into `.claude/`
+    (remote tools may not write .claude/ directly).
+  - Docs: `docs/IMPROVE_LOOP.md` (plan, rules, playbook), `docs/KNOWLEDGE.md` (sourced techniques,
+    IDs cited by configs/loop.yaml, build queue).
+  - Tests: `tests/test_loop.py` (recovery, guardrails, sanity, promotion stats, vote/caruana,
+    branch consistency, dry runs with OOM recovery, escalation + resume, systemic failure, proposals).
+- Dry run (1200 synthetic train / 300 test, 8 iterations): 22 experiments, 3 promotions, champion =
+  vote ensemble, 16.6 of 18 GPU h (simulated), stopped when nothing fit the remaining budget.
+- Commands: `pytest -q tests/test_loop.py`; `liars loop doctor --executor kaggle`; `liars loop run --executor dry --iters 6`.
+- Independent review (separate agent): 11 bugs found and fixed (mid-batch escalation lost results;
+  failed baseline killed a branch forever; skipped runs re-planned; recovery forgot the failed config;
+  '401'/'500' in progress logs misread; fragile Kaggle status/timeout/fetch handling; resume kept error
+  counts; proposals could lower estimates; id collisions; one ensemble method failing killed all;
+  max_experiments off by one). Regression tests added for each.
+- Known issues / TODO: est_gpu_h for qlora_qwen and line_mil are estimates; build queue in
+  docs/KNOWLEDGE.md (self-distillation, top-k MIL loss, minimal pairs, vLLM, cascade) not built.
+- Explain-it-to-me: the loop keeps a lab notebook (the ledger). Each round it runs the most
+  promising untried experiment, checks the result is sane, and only crowns a new best model if
+  it wins by more than chance (McNemar test). Different models are also combined by voting.
+  When something breaks it retries in a cheaper way, and if it cannot fix it, it stops and asks.
+- Commit: (user commits; see git log)
+

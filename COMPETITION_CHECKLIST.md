@@ -20,6 +20,7 @@ PROGRESS.md → "Competition log". Max 5 submissions per day; keep the last 2 fo
 | T+2:00 | **Rules** from their templates | 1–2 h | Paste the rules prompt. Keep only rules with precision ≥ 0.9 (`liars rules-report`) |
 | ~T+2:30 | **Zero-shot lands** → first milestone | 15 min | `python scripts/kaggle_run.py fetch --name <job>`; `liars score`; submit |
 | ~T+4–5 | **QLoRA lands** → ensemble + milestone | 20 min | fetch; then push DeBERTa (if `liars plan` said RUN); `liars ensemble --runs ... --name e1`; `liars analyze --run ens_e1`; submit |
+| if quota left | **Extra members** (optional) | 1–3 h GPU | `configs/line_mil.yaml` and/or `configs/llm_qlora_qwen.yaml`, holdout mode, then add the runs to `liars ensemble` |
 | every 3–4 h | **Improvement loop** | 30 min | Paste the prompt; pick ONE fix; rerun only what it touches |
 | ~T+24 | **Pseudo-labels** (ONLY if organizers said yes in writing) | 3–5 h GPU | `--set pseudo.enabled=true`; compare holdout with/without |
 | T+42 | **Lock in**: SAFE + BOLD, METHODOLOGY.md | 2 h | SAFE = best honest holdout, simplest; BOLD = best ensemble. Fill METHODOLOGY.md TODOs; copy `data/logs/pip_freeze_kaggle.txt` into requirements-lock.txt |

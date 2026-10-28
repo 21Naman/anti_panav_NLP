@@ -8,6 +8,9 @@ ensemble:
   select_tol: 0.003      # auto: weighted / mean / best single within 0.3 points of the top accuracy
                          # count as tied; the lowest log-loss among them wins
   stack_margin: 0.003    # auto picks stack only if it beats that choice by > 0.3 points
+  auto_candidates: [weighted, mean, single]   # add vote / caruana to let auto pick them
+  caruana_iters: 20      # greedy additions (with replacement)
+  caruana_init: 1        # start from the N best single runs
 
 analysis:
   length_bins: [0, 10, 14, 18, 22, 1000]       # messages per chat

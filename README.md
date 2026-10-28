@@ -279,6 +279,51 @@ Bench result: QLoRA + DeBERTa mean = 98.0% holdout (honest) / 97.3% bench test v
 97.5% / 96.8%. `--method auto` also considers the best single run and treats accuracy gaps under
 `ensemble.select_tol` (0.3 points) as ties broken by log-loss.
 
+## Extra ensemble members: line-level MIL checker + Qwen QLoRA
+
+Optional, after the main runs (QLoRA gemma, zero-shot, DeBERTa) if GPU quota is left.
+
+**`line_mil`** scores every chat line against the evidence (with 3 lines of context before and
+1 after, the line itself marked `<t> ... </t>`) using an NLI DeBERTa cross-encoder. Each
+speaker's score is a soft max over their lines; a softmax over A-D is trained on the liar
+label only (multiple-instance learning), so no line labels are needed. It also reports which
+line it thinks is the lie (`LineMILModel.line_scores`).
+
+```bash
+liars train --config configs/line_mil.yaml --debug                        # CPU check, < 2 min
+liars train --config configs/line_mil.yaml --test <test.jsonl>            # Kaggle T4, holdout mode
+liars train --config configs/line_mil.yaml --stage 1                      # optional: pretrain on synthetic
+liars train --config configs/line_mil.yaml --stage 2 --test <test.jsonl>  #   with line labels, then fine-tune
+liars predict --run latest:line_mil --in <test.jsonl> --gpus 2 --test-preds
+```
+Cost: about 3x DeBERTa MC (estimate, not timed). Faster: `--set line_mil.model_id=MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`.
+
+**`llm_qlora_qwen.yaml`** is `llm_qlora.yaml` with `Qwen/Qwen3-14B`, `prompt.answer_prefix: "Answer:"`
+(Qwen3 needs it) and micro batch 1 x 16. Same commands as the gemma QLoRA run. A second model
+family gives the ensemble more variety than a second gemma run.
+
+## Improvement loop (`liars loop`, `/improve-loop`)
+
+A self-improving experiment loop: **plan -> act -> test -> evaluate -> improve -> repeat**.
+Branches (gemma QLoRA, Qwen QLoRA, DeBERTa, line MIL, zero-shot LLM/NLI, TF-IDF) are explored,
+then improved one knob at a time, then recombined (majority vote, Caruana selection, weighted).
+A new champion must beat the old one with a paired McNemar test. Guardrails (GPU budget,
+allowed overrides, no pseudo-labels, unlabelled test, no duplicates), sanity tests on every
+run, and recovery (retry with backoff / smaller batch / fewer epochs / lower lr, or escalate
+to you with `data/loop/ESCALATE.md`). Works on any canonical dataset.
+
+```bash
+liars loop doctor --executor kaggle            # environment + data + branch checks
+liars loop run --executor dry --iters 6        # simulated runs: whole cycle in seconds
+liars loop run --executor kaggle --iters 1     # one real iteration (2 GPU jobs)
+liars loop status                              # report: champion, budget, decisions
+liars loop resume                              # after you fixed an escalation
+```
+Run `bash scripts/install_agents.sh` once (copies `agents/` into `.claude/`). Then in Claude Code, `/improve-loop kaggle 1` adds the reasoning agents: `loop-planner` proposes
+experiments from the ledger + `docs/KNOWLEDGE.md`, `loop-auditor` recomputes every promotion
+and halts the loop if anything does not hold. Plan and rules: `docs/IMPROVE_LOOP.md`;
+sourced techniques: `docs/KNOWLEDGE.md`; settings: `configs/loop.yaml`.
+
 ## Competition-day sizing (`liars plan`)
 
 What it does: `src/liars/sizing.py` turns train size, test size and chat length into GPU hours

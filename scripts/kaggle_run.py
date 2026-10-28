@@ -188,12 +188,19 @@ def build_notebook(commands: list[str], ref: str = "main", repo: str = REPO,
 # Kaggle CLI helpers
 # --------------------------------------------------------------------------------------
 def kaggle_user() -> str:
+    """Kaggle username: $KAGGLE_USERNAME, else the legacy ~/.kaggle/kaggle.json. The newer
+    CLI logins (API token in ~/.kaggle/access_token / $KAGGLE_API_TOKEN, or `kaggle auth login`)
+    store no username, so set KAGGLE_USERNAME with them."""
     import os
 
     if os.environ.get("KAGGLE_USERNAME"):
         return os.environ["KAGGLE_USERNAME"]
-    with open(Path.home() / ".kaggle" / "kaggle.json") as f:
-        return json.load(f)["username"]  # only the username is read
+    legacy = Path.home() / ".kaggle" / "kaggle.json"
+    if legacy.exists():
+        with open(legacy) as f:
+            return json.load(f)["username"]  # only the username is read
+    raise SystemExit("Kaggle username unknown: `export KAGGLE_USERNAME=<your kaggle username>` "
+                     "(add it to ~/.bashrc), or use a legacy ~/.kaggle/kaggle.json")
 
 
 def kaggle(*args: str, check: bool = True) -> subprocess.CompletedProcess:

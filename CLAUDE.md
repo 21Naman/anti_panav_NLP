@@ -97,6 +97,9 @@ built and tested on our own synthetic data.
 - Every new module gets a pytest using `tests/fixtures/tiny.jsonl`. Tests must be
   fast (whole suite under about 60 s on a laptop CPU).
 - Kaggle notebooks stay thin: install the repo, set paths, call the CLI. No logic.
+- Improvement loop (`liars loop`, docs/IMPROVE_LOOP.md): only the human changes
+  `configs/loop.yaml` budget / stop / guardrail settings and resumes an escalated loop.
+  Agents propose via `data/loop/proposals.yaml`; metrics come only from `src/liars/loop/evaluate.py`.
 
 ## Token and context hygiene
 - Don't print whole large files. Use `head`, `tail`, `wc -l`, or Read with limits.
