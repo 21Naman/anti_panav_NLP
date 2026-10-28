@@ -91,8 +91,8 @@ class KaggleExecutor:
 
     def __init__(self, root: Path, datasets: list[str], max_concurrent: int, poll_s: int = 60,
                  timeout_h: float = 12.0, runner: Callable[..., subprocess.CompletedProcess] | None = None,
-                 sleep=time.sleep, max_unreadable: int = 10, fetch_tries: int = 3):
-        self.max_unreadable, self.fetch_tries = max_unreadable, fetch_tries
+                 sleep=time.sleep, max_unreadable: int = 10, fetch_tries: int = 3, code_mode: str = "dataset"):
+        self.max_unreadable, self.fetch_tries, self.code_mode = max_unreadable, fetch_tries, code_mode
         self.root, self.datasets, self.max_concurrent = Path(root), datasets, max_concurrent
         self.poll_s, self.timeout_s, self.sleep = poll_s, timeout_h * 3600, sleep
         self.runner = runner or (lambda *a: subprocess.run(
@@ -127,7 +127,8 @@ class KaggleExecutor:
         started, results, unreadable = {}, {}, {}
         for e in exps:
             cmd = "liars " + " ".join(_quote(a) for a in argv(e))
-            r = self.runner("push", "--name", self.job_name(e), "--datasets", *self.datasets, "--cmd", cmd)
+            r = self.runner("push", "--name", self.job_name(e), "--code", self.code_mode,
+                            "--datasets", *self.datasets, "--cmd", cmd)
             if r.returncode != 0:
                 results[e.id] = ExecResult(False, None, _tail(r.stdout + r.stderr), 0.0, 0.0)
             else:

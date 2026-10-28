@@ -83,6 +83,8 @@ loop:
 
   kaggle:
     datasets: [liars-comp]   # private data dataset holding data.train/test/folds
+    code: dataset            # dataset = the private liars-code snapshot (refreshed from your last
+                             # commit on every push; no GitHub push needed) | auto | git
     poll_s: 60
 
   dry:                       # simulated quality per branch (dry executor only)

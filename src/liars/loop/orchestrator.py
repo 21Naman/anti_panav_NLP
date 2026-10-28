@@ -520,7 +520,8 @@ def build_loop(lcfg: dict, executor_name: str, log=print, sleep=time.sleep, dry_
         if Path(loop_cfg["data_dir"]).resolve() != (Path(".") / "data").resolve():
             raise ValueError("the kaggle executor merges outputs into ./data: set loop.data_dir: data")
         ex = KaggleExecutor(Path("."), loop_cfg["kaggle"]["datasets"], loop_cfg["budget"]["max_concurrent"],
-                            loop_cfg["kaggle"]["poll_s"], loop_cfg["budget"]["per_run_max_h"] * 1.5, sleep=sleep)
+                            loop_cfg["kaggle"]["poll_s"], loop_cfg["budget"]["per_run_max_h"] * 1.5, sleep=sleep,
+                            code_mode=loop_cfg["kaggle"].get("code", "dataset"))
     elif executor_name == "dry":
         # simulated runs make independent errors, so a vote of them can look "too good":
         # in dry mode that check only warns (it still escalates for real executors)
