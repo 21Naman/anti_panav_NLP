@@ -47,6 +47,15 @@ MANIFEST = "manifest.json"
 # --------------------------------------------------------------------------------------
 INSTALL_CELL = r'''# Install: git clone with the GH_TOKEN Kaggle Secret, else the private code dataset.
 import glob, json, os, shutil, subprocess, sys, tarfile, time
+import urllib.request
+# Fail fast without internet (pip and Hugging Face need it): Kaggle silently turns Internet off
+# for accounts that are not phone-verified, and the install would only fail minutes later.
+try:
+    urllib.request.urlopen("https://pypi.org/simple/pip/", timeout=15)
+    print("internet: ok")
+except Exception as e:
+    raise SystemExit(f"NO INTERNET in this Kaggle session ({type(e).__name__}). Phone-verify the account "
+                     "(kaggle.com -> Settings -> Phone verification) and check Session options -> Internet: On.")
 WORK = "/tmp/liars"   # outside /kaggle/working, so nothing here is saved as output
 
 def secret(name):
