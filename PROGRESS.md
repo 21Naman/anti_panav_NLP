@@ -811,4 +811,6 @@ Claude appends one entry per phase using this template:
 - line_mil v2 (`line_mil_1028-205041`, lr 3e-5, 4 epochs): **96.0% held-out (400), 98.0% test (1000)**,
   lie-line hit rate 97.5%, 67 min, 8.2 GiB. Weakest: two_step 76.5% held-out / 87.8% test. Now the
   config default; loop branch est 1.2 h, prior high, space context_before / epochs / lr first.
-- Qwen QLoRA bench run (`qwen-bench`) started in parallel; results pending.
+- Qwen QLoRA (`llm_qlora_qwen_1028-204957`, Qwen3-14B 4-bit, micro batch 1 x 16): **98.0% held-out (400)**,
+  inner val 100% from step 115, 2.5 h (134 min training), 10.5 GiB, 3 fp16-skipped steps, 0 NaN rows,
+  temperature 0.25. Loop branch est 2.6 h.

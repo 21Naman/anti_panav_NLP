@@ -119,7 +119,7 @@ branches:
   qlora_qwen:
     family: qlora
     config: configs/llm_qlora_qwen.yaml
-    est_gpu_h: 3.0           # estimate: 14B ~15% slower than 12B
+    est_gpu_h: 2.6           # timed 2026-10-29: 2.5 h on T4 (1520 train chats, 2 epochs, + test); 98.0% held-out
     prior: high
     hypothesis: "second LLM family for ensemble diversity (Qwen 14B dominated WSDM top places)"
     space:
