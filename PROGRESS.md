@@ -814,3 +814,10 @@ Claude appends one entry per phase using this template:
 - Qwen QLoRA (`llm_qlora_qwen_1028-204957`, Qwen3-14B 4-bit, micro batch 1 x 16): **98.0% held-out (400)**,
   inner val 100% from step 115, 2.5 h (134 min training), 10.5 GiB, 3 fp16-skipped steps, 0 NaN rows,
   temperature 0.25. Loop branch est 2.6 h.
+  Test (1000): **98.7%**.
+- Ensemble line_mil v2 + Qwen (`ens_lm_qwen`, auto -> mean): held-out 98.5% (400), log-loss 0.055
+  (Qwen alone 0.168); **test 99.3%**; two_step 97.0% on test (line_mil alone 87.8%). Vote 98.5%,
+  weighted 98.0%, stack 98.75% held-out. Gains over Qwen alone (+0.5 held-out = 2 chats, +0.6 test)
+  are within noise for accuracy; the log-loss drop is the solid gain. Previous best: gemma+DeBERTa
+  mean 98.0% / 97.3%.
+- GPU used on namanbhandari597 so far: ~4.4 h (2 failed starts 0.2, line_mil 0.65 + 1.1, Qwen 2.5).
