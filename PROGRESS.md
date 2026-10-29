@@ -8,6 +8,19 @@
 - Current phase: 9 — step A done (2026-10-29): rehearsal data generated in data/raw/ (gitignored).
   Hidden scorer: `python ~/liars_rehearsal_gen/score.py SUB.csv`. Next: step B in a FRESH session.
   Do not open ~/liars_rehearsal_gen/ during step B except to run score.py.
+- HANDOFF (2026-10-29): a colleague may run step B from a fresh clone of the GitHub repo.
+  - The rehearsal files are NOT in git: `data/` is gitignored, and the generator, scorer and
+    hidden test labels are in `~/liars_rehearsal_gen/` on the original laptop only (outside the repo).
+  - Before step B, the colleague gets `train.csv`, `test.csv` and `sample_submission.csv`
+    from the user privately and puts them in `data/raw/`. They do NOT get the generator, the
+    scorer or the labels: the user scores each submission with `score.py` and reports the
+    number back. If anyone sees the generator code, the rehearsal is no longer blind.
+  - Never commit or upload anything from `data/raw/` or `~/liars_rehearsal_gen/`.
+  - Git remotes on the original laptop: `origin` = github.com/Panavdoesstuff/liars-chatroom,
+    `naman` = github.com/21Naman/anti_panav_NLP (main pushed 2026-10-29). A fresh clone has
+    only its own `origin`.
+  - Kaggle: the colleague needs their own Kaggle API credentials (docs/KAGGLE.md). The GPU
+    quota noted here belongs to the original account.
 - Last completed phase: 10 (pseudo-labelling, switched off) + prep wrap-up (2026-10-27) — done.
   All prep phases 0–8 and 10 are done; Phase 9 (dress rehearsal) is the only one left.
 - Next step: the user starts Phase 9 step B in a fresh session (BUILD_MAP "Phase 9"). GPU quota is
@@ -20,6 +33,8 @@
 - Blockers / waiting on: organizers' answer on pseudo-labelling; event start date;
   USER: `git push origin main` is blocked by a macOS Keychain prompt (git-credential-osxkeychain
   waits for a click) — run `git push` once yourself. Until then Kaggle runs use `--code dataset`.
+  [2026-10-29: the Keychain issue was on the old Mac. On the Linux laptop, `git push -u naman main`
+  worked; `origin` was not pushed.]
   USER (optional): Kaggle Secrets are not attached to API-pushed kernels (see docs/KAGGLE.md §5).
 - Standing reminder: at the end of EVERY phase, remind the user to fill in the event
   dates (until "Event dates" below is filled).
