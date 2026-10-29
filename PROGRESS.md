@@ -5,10 +5,12 @@
 
 ## Current state
 - Mode: PREP            <!-- PREP | REHEARSAL | COMPETITION -->
-- Current phase: 9 — NOT STARTED (needs the user: separate sessions, timed)
+- Current phase: 9 — step A done (2026-10-29): rehearsal data generated in data/raw/ (gitignored).
+  Hidden scorer: `python ~/liars_rehearsal_gen/score.py SUB.csv`. Next: step B in a FRESH session.
+  Do not open ~/liars_rehearsal_gen/ during step B except to run score.py.
 - Last completed phase: 10 (pseudo-labelling, switched off) + prep wrap-up (2026-10-27) — done.
   All prep phases 0–8 and 10 are done; Phase 9 (dress rehearsal) is the only one left.
-- Next step: the user starts Phase 9 in a fresh session (BUILD_MAP "Phase 9"). GPU quota is
+- Next step: the user starts Phase 9 step B in a fresh session (BUILD_MAP "Phase 9"). GPU quota is
   saved for it (~21 h left this week). Don't start GPU runs before that.
 - Autonomy (2026-10-27): the user is away and said to keep going phase after phase
   without waiting for "next", verifying every Done-when check myself. Stop only for
@@ -21,7 +23,7 @@
   USER (optional): Kaggle Secrets are not attached to API-pushed kernels (see docs/KAGGLE.md §5).
 - Standing reminder: at the end of EVERY phase, remind the user to fill in the event
   dates (until "Event dates" below is filled).
-- Last updated: 2026-10-27
+- Last updated: 2026-10-29
 
 ## Key facts (Claude keeps this current)
 - Event dates (48 h window): UNKNOWN — follow the full plan; remind the user at the end of every phase.
